@@ -4,7 +4,7 @@
 
 ## Быстрый старт
 
-1. Скопируйте `.env.example` в `.env`, заполните `BOT_TOKEN` и при необходимости настройте `LOG_LEVEL`/`LOG_RICH`/`LOG_JSON`.
+1. Скопируйте `.env.example` в `.env`, заполните любой из токенов `TELEGRAM_BOT_TOKEN`/`BOT_TOKEN`/`TG_BOT_TOKEN` и при необходимости настройте `LOG_LEVEL`/`LOG_RICH`/`LOG_JSON`.
 2. Установите зависимости:
    ```bash
    pip install -r requirements.txt
