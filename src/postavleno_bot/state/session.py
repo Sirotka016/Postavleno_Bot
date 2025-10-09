@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(slots=True)
 class ChatSession:
     last_bot_message_id: int | None = None
+    stocks_wh_map: dict[str, str] = field(default_factory=dict)
+    stocks_view: str | None = None  # "all" | "wh:abcd1234" | "summary" | None
 
 
 class SessionStorage:
@@ -28,6 +30,18 @@ class SessionStorage:
     async def clear(self, chat_id: int) -> None:
         async with self._lock:
             self._sessions.pop(chat_id, None)
+
+    async def get_session(self, chat_id: int) -> ChatSession:
+        async with self._lock:
+            return self._sessions.setdefault(chat_id, ChatSession())
+
+    async def update_session(self, chat_id: int, **fields: object) -> ChatSession:
+        async with self._lock:
+            session = self._sessions.setdefault(chat_id, ChatSession())
+            for name, value in fields.items():
+                if hasattr(session, name):
+                    setattr(session, name, value)
+            return session
 
 
 session_storage = SessionStorage()
