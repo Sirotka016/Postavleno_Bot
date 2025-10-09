@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     bot_token: str
     log_rich: bool = True
     log_json: bool = True
+    log_level: str = "INFO"
     environment: Literal["development", "production", "test"] = "development"
 
     model_config = SettingsConfigDict(

@@ -26,7 +26,8 @@ class RequestIdMiddleware(BaseMiddleware):
         try:
             return await handler(event, data)
         finally:
-            try:
-                structlog.contextvars.unbind_contextvars("request_id", "latency_ms")
-            except LookupError:
-                structlog.contextvars.clear_contextvars()
+            for key in ("latency_ms", "request_id"):
+                try:
+                    structlog.contextvars.unbind_contextvars(key)
+                except LookupError:
+                    pass

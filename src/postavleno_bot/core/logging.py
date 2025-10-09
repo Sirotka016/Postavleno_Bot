@@ -88,11 +88,23 @@ def _create_file_handler(log_dir: Path) -> TimedRotatingFileHandler:
     return handler
 
 
-def setup_logging(*, rich_enabled: bool | None = None, json_enabled: bool | None = None) -> None:
+def setup_logging(
+    *,
+    rich_enabled: bool | None = None,
+    json_enabled: bool | None = None,
+    level: str | int | None = None,
+) -> None:
     if rich_enabled is None:
         rich_enabled = os.getenv("LOG_RICH", "true").lower() == "true"
     if json_enabled is None:
         json_enabled = os.getenv("LOG_JSON", "true").lower() == "true"
+    if level is None:
+        level = os.getenv("LOG_LEVEL", "INFO")
+
+    if isinstance(level, str):
+        numeric_level = getattr(logging, level.upper(), logging.INFO)
+    else:
+        numeric_level = int(level)
 
     processors: list[Callable[..., Any]] = [
         structlog.contextvars.merge_contextvars,
@@ -111,15 +123,16 @@ def setup_logging(*, rich_enabled: bool | None = None, json_enabled: bool | None
         cache_logger_on_first_use=True,
     )
 
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=numeric_level)
     root_logger = logging.getLogger()
     root_logger.handlers.clear()
+    root_logger.setLevel(numeric_level)
 
     foreign_pre_chain = list(processors)
 
     if rich_enabled:
         console_handler = _create_rich_handler()
-        console_handler.setLevel(logging.INFO)
+        console_handler.setLevel(numeric_level)
         console_handler.setFormatter(
             structlog.stdlib.ProcessorFormatter(
                 foreign_pre_chain=foreign_pre_chain,
@@ -130,7 +143,7 @@ def setup_logging(*, rich_enabled: bool | None = None, json_enabled: bool | None
 
     if json_enabled:
         file_handler = _create_file_handler(Path("logs"))
-        file_handler.setLevel(logging.INFO)
+        file_handler.setLevel(numeric_level)
         file_handler.setFormatter(
             structlog.stdlib.ProcessorFormatter(
                 foreign_pre_chain=foreign_pre_chain,

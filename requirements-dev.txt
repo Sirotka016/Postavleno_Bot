@@ -4,4 +4,6 @@ black>=24.4,<25.0
 ruff>=0.6,<0.7
 mypy>=1.10,<2.0
 pre-commit>=3.7,<4.0
+rich>=13.8,<14.0
+orjson>=3.10,<4.0
 types-orjson>=3.6.2
