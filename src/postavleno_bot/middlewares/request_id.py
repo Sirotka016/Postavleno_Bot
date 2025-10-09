@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Any, Awaitable, Callable, Dict
+from collections.abc import Awaitable, Callable
+from contextlib import suppress
+from typing import Any
 
+import structlog
 from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject
-import structlog
 
 
 class RequestIdMiddleware(BaseMiddleware):
@@ -14,9 +16,9 @@ class RequestIdMiddleware(BaseMiddleware):
 
     async def __call__(
         self,
-        handler: Callable[[TelegramObject, Dict[str, Any]], Awaitable[Any]],
+        handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]],
         event: TelegramObject,
-        data: Dict[str, Any],
+        data: dict[str, Any],
     ) -> Any:
         request_id = uuid.uuid4().hex
         structlog.contextvars.bind_contextvars(request_id=request_id)
@@ -27,7 +29,5 @@ class RequestIdMiddleware(BaseMiddleware):
             return await handler(event, data)
         finally:
             for key in ("latency_ms", "request_id"):
-                try:
+                with suppress(LookupError):
                     structlog.contextvars.unbind_contextvars(key)
-                except LookupError:
-                    pass

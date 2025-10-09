@@ -2,10 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from aiogram.exceptions import TelegramBadRequest
-
 from postavleno_bot.handlers import menu
-from postavleno_bot.utils.safe_telegram import _is_not_modified_error
+from postavleno_bot.utils.safe_telegram import is_not_modified_error
 
 
 def test_main_card_text_contains_expected_phrases() -> None:
@@ -42,10 +40,8 @@ def test_products_card_text_mentions_catalog() -> None:
 
 
 def test_is_not_modified_error_detection() -> None:
-    error = TelegramBadRequest("Bad Request: message is not modified")
-    assert _is_not_modified_error(error) is True
+    assert is_not_modified_error("Bad Request: message is not modified") is True
 
 
 def test_is_not_modified_error_detection_false() -> None:
-    error = TelegramBadRequest("Bad Request: chat not found")
-    assert _is_not_modified_error(error) is False
+    assert is_not_modified_error("Bad Request: chat not found") is False

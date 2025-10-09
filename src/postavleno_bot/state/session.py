@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass(slots=True)
 class ChatSession:
-    last_bot_message_id: Optional[int] = None
+    last_bot_message_id: int | None = None
 
 
 class SessionStorage:
@@ -17,7 +16,7 @@ class SessionStorage:
         self._lock = asyncio.Lock()
         self._sessions: dict[int, ChatSession] = {}
 
-    async def get_last_message_id(self, chat_id: int) -> Optional[int]:
+    async def get_last_message_id(self, chat_id: int) -> int | None:
         async with self._lock:
             return self._sessions.get(chat_id, ChatSession()).last_bot_message_id
 

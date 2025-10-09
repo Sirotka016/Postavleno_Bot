@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 import time
-from contextlib import contextmanager
+from collections.abc import Iterator
+from contextlib import contextmanager, suppress
 from datetime import datetime
-from typing import Iterator, Optional
 
+import structlog
 from aiogram import Bot, F, Router
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ReplyKeyboardRemove
-import structlog
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+    ReplyKeyboardRemove,
+)
 from structlog.stdlib import BoundLogger
 
 from ..core.logging import get_logger
@@ -29,10 +35,8 @@ def _action_logger(action: str, request_id: str) -> Iterator[BoundLogger]:
     try:
         yield logger
     finally:
-        try:
+        with suppress(LookupError):
             structlog.contextvars.unbind_contextvars("action")
-        except LookupError:
-            pass
 
 
 def _format_timestamp(now: datetime | None = None) -> str:
@@ -99,7 +103,7 @@ async def _render_card(
     chat_id: int,
     text: str,
     with_reply_keyboard: bool,
-) -> Optional[int]:
+) -> int | None:
     inline_markup = _inline_menu()
     last_message_id = await session_storage.get_last_message_id(chat_id)
 
@@ -159,7 +163,9 @@ async def handle_start(message: Message, bot: Bot, request_id: str, started_at: 
 
         latency_ms = round((time.perf_counter() - started_at) * 1000, 2)
         structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
-        logger.info("Главное меню показано", result="ok" if success else "fail", message_id=message_id)
+        logger.info(
+            "Главное меню показано", result="ok" if success else "fail", message_id=message_id
+        )
         structlog.contextvars.unbind_contextvars("latency_ms")
 
 
@@ -185,12 +191,16 @@ async def handle_help(message: Message, bot: Bot, request_id: str, started_at: f
 
 
 @MENU_ROUTER.message(F.text == "ℹ️ Помощь")
-async def handle_help_button(message: Message, bot: Bot, request_id: str, started_at: float) -> None:
+async def handle_help_button(
+    message: Message, bot: Bot, request_id: str, started_at: float
+) -> None:
     await handle_help(message, bot, request_id, started_at)
 
 
 @MENU_ROUTER.message(F.text == "🔎 Статус заказа")
-async def handle_status_button(message: Message, bot: Bot, request_id: str, started_at: float) -> None:
+async def handle_status_button(
+    message: Message, bot: Bot, request_id: str, started_at: float
+) -> None:
     with _action_logger("status", request_id) as logger:
         logger.info("Выбран раздел статуса заказа")
 
@@ -205,12 +215,16 @@ async def handle_status_button(message: Message, bot: Bot, request_id: str, star
 
         latency_ms = round((time.perf_counter() - started_at) * 1000, 2)
         structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
-        logger.info("Карточка статуса показана", result="ok" if success else "fail", message_id=message_id)
+        logger.info(
+            "Карточка статуса показана", result="ok" if success else "fail", message_id=message_id
+        )
         structlog.contextvars.unbind_contextvars("latency_ms")
 
 
 @MENU_ROUTER.message(F.text == "📦 Товары")
-async def handle_products_button(message: Message, bot: Bot, request_id: str, started_at: float) -> None:
+async def handle_products_button(
+    message: Message, bot: Bot, request_id: str, started_at: float
+) -> None:
     with _action_logger("products", request_id) as logger:
         logger.info("Выбран раздел товаров")
 
@@ -225,12 +239,16 @@ async def handle_products_button(message: Message, bot: Bot, request_id: str, st
 
         latency_ms = round((time.perf_counter() - started_at) * 1000, 2)
         structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
-        logger.info("Карточка товаров показана", result="ok" if success else "fail", message_id=message_id)
+        logger.info(
+            "Карточка товаров показана", result="ok" if success else "fail", message_id=message_id
+        )
         structlog.contextvars.unbind_contextvars("latency_ms")
 
 
 @MENU_ROUTER.message()
-async def handle_unknown_message(message: Message, bot: Bot, request_id: str, started_at: float) -> None:
+async def handle_unknown_message(
+    message: Message, bot: Bot, request_id: str, started_at: float
+) -> None:
     with _action_logger("unknown_text", request_id) as logger:
         logger.info("Получен произвольный текст", text=message.text)
 
@@ -254,7 +272,9 @@ async def handle_unknown_message(message: Message, bot: Bot, request_id: str, st
 
 
 @MENU_ROUTER.callback_query(lambda c: c.data == REFRESH_CALLBACK)
-async def handle_refresh(callback: CallbackQuery, bot: Bot, request_id: str, started_at: float) -> None:
+async def handle_refresh(
+    callback: CallbackQuery, bot: Bot, request_id: str, started_at: float
+) -> None:
     with _action_logger("refresh", request_id) as logger:
         logger.info("Поступил запрос на обновление меню")
 
@@ -278,7 +298,9 @@ async def handle_refresh(callback: CallbackQuery, bot: Bot, request_id: str, sta
 
 
 @MENU_ROUTER.callback_query(lambda c: c.data == EXIT_CALLBACK)
-async def handle_exit(callback: CallbackQuery, bot: Bot, request_id: str, started_at: float) -> None:
+async def handle_exit(
+    callback: CallbackQuery, bot: Bot, request_id: str, started_at: float
+) -> None:
     with _action_logger("exit", request_id) as logger:
         logger.info("Поступил запрос на закрытие меню")
 

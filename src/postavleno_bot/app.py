@@ -11,7 +11,6 @@ from .handlers.menu import MENU_ROUTER
 from .middlewares.request_id import RequestIdMiddleware
 from .middlewares.user_context import UserContextMiddleware
 
-
 BOT_COMMANDS = [
     BotCommand(command="start", description="Запустить бота"),
     BotCommand(command="help", description="Помощь"),

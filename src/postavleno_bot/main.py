@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 
 from .app import create_bot, create_dispatcher
 from .core.config import get_settings
@@ -15,10 +16,14 @@ async def main() -> None:
         level=settings.log_level,
     )
 
+    logger = get_logger(__name__).bind(action="run")
+    if os.getenv("POSTAVLENO_BOT_SKIP_POLLING") == "1":
+        logger.info("Запуск бота пропущен по переменной окружения")
+        return
+
     bot = create_bot(settings)
     dispatcher = create_dispatcher()
 
-    logger = get_logger(__name__).bind(action="run")
     logger.info("Бот запускается")
 
     await dispatcher.start_polling(bot)
