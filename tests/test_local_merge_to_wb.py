@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import pandas as pd
-
 import os
+
+import pandas as pd
 
 from postavleno_bot.core.config import get_settings
 from postavleno_bot.handlers.menu import build_local_export_text, build_local_upload_text

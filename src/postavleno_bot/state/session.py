@@ -26,6 +26,7 @@ class ChatSession:
     local_join_ready: bool = False
     local_page: int = 1
     local_stats: object | None = None
+    expecting_upload: bool = False  # when True, keep user messages (documents/text)
 
 
 class SessionStorage:

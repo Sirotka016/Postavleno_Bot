@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
-import re
 
 import pandas as pd
 
@@ -314,10 +314,7 @@ def load_latest(chat_id: int, kind: str) -> pd.DataFrame | None:
 def build_local_preview(df: pd.DataFrame, *, limit: int = 25) -> tuple[list[str], int]:
     total = len(df)
     subset = df.head(limit)
-    lines = [
-        f"• {row['Артикул']} — {row['Кол-во_наш_склад']}"
-        for _, row in subset.iterrows()
-    ]
+    lines = [f"• {row['Артикул']} — {row['Кол-во_наш_склад']}" for _, row in subset.iterrows()]
     return lines, total
 
 
