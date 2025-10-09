@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     log_json: bool = Field(True, validation_alias=AliasChoices("LOG_JSON"))
     log_rich: bool = Field(True, validation_alias=AliasChoices("LOG_RICH"))
     sentry_dsn: str | None = Field(None, validation_alias=AliasChoices("SENTRY_DSN"))
+    local_store_name: str = Field(
+        "FootballShop",
+        validation_alias=AliasChoices("LOCAL_STORE_NAME"),
+        description="Название локального склада для итоговой выгрузки",
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",

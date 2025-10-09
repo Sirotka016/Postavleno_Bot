@@ -25,6 +25,7 @@ class ChatSession:
     local_uploaded_local: Path | None = None
     local_join_ready: bool = False
     local_page: int = 1
+    local_stats: object | None = None
 
 
 class SessionStorage:

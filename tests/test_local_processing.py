@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from postavleno_bot.services.local import classify_dataframe, perform_join
+from postavleno_bot.services.local import classify_dataframe, merge_wb_with_local
 
 
 def test_classify_wb_vs_local() -> None:
@@ -34,7 +34,6 @@ def test_join_keeps_only_wb_articles() -> None:
         {
             "supplierArticle": ["SKU-1", "SKU-2"],
             "nmId": [111, 222],
-            "warehouseName": ["A", "B"],
             "quantity": [10, 5],
         }
     )
@@ -46,10 +45,11 @@ def test_join_keeps_only_wb_articles() -> None:
         }
     )
 
-    result, stats = perform_join(wb_df, local_df)
+    result, stats = merge_wb_with_local(wb_df, local_df, store_name="TestStore")
 
-    assert list(result["Артикул"]) == ["SKU-1"]
-    assert list(result["Количество_склад"]) == [4]
-    assert stats.wb_count == 2
-    assert stats.matched == 1
-    assert stats.dropped == 1
+    assert list(result["Артикул"]) == ["SKU-1", "SKU-2"]
+    assert list(result["Кол-во_наш_склад"]) == [4, 0]
+    assert stats.wb_rows == 2
+    assert stats.wb_unique == 2
+    assert stats.local_rows == 2
+    assert stats.matched_rows == 1
