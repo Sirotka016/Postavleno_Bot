@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import io
 from datetime import datetime
 
+import pandas as pd
+
 from postavleno_bot.integrations.wb_client import WBStockItem
-from postavleno_bot.services.stocks import build_export_csv, build_export_filename
+from postavleno_bot.services.export import dataframe_to_xlsx_bytes
+from postavleno_bot.services.stocks import build_export_filename, build_export_xlsx
 
 
 def _item(
@@ -35,27 +39,55 @@ def _item(
     )
 
 
-def test_csv_headers_and_first_row() -> None:
+def test_export_xlsx_headers() -> None:
     items = [
         _item("Склад B", article="B", nm=2, quantity=5, price=1000, discount=10),
         _item("Склад A", article="A", nm=1, quantity=7, price=1500, discount=5),
     ]
 
-    csv_data = build_export_csv(items).decode("utf-8").splitlines()
+    data = build_export_xlsx(items)
+    df = pd.read_excel(io.BytesIO(data))
 
-    assert (
-        csv_data[0]
-        == "Склад;Артикул;nmId;Штрихкод;Кол-во;Категория;Предмет;Бренд;Размер;Цена;Скидка"
-    )
+    assert list(df.columns) == [
+        "Склад",
+        "Артикул",
+        "nmId",
+        "Штрихкод",
+        "Кол-во",
+        "Категория",
+        "Предмет",
+        "Бренд",
+        "Размер",
+        "Цена",
+        "Скидка",
+    ]
 
     # Sorted by warehouse asc, quantity desc.
-    assert csv_data[1] == "Склад A;A;1;bc-1;7;Категория;Предмет;Бренд;M;1500;5"
+    first_row = df.iloc[0].to_dict()
+    assert first_row["Склад"] == "Склад A"
+    assert first_row["Артикул"] == "A"
+    assert first_row["nmId"] == 1
+    assert first_row["Кол-во"] == 7
+
+
+def test_excel_roundtrip() -> None:
+    frame = pd.DataFrame(
+        {
+            "Колонка A": [1, 2, 3],
+            "Колонка B": ["x", "y", "z"],
+        }
+    )
+
+    payload = dataframe_to_xlsx_bytes(frame, sheet_name="Sheet")
+    restored = pd.read_excel(io.BytesIO(payload))
+
+    assert restored.equals(frame)
 
 
 def test_filename_all_vs_single() -> None:
     moment = datetime(2024, 1, 2, 15, 30)
-    assert build_export_filename("ALL", None, moment) == "wb_ostatki_ALL_20240102_1530.csv"
+    assert build_export_filename("ALL", None, moment) == "wb_ostatki_ALL_20240102_1530.xlsx"
     assert (
         build_export_filename("wh", "Склад Москва", moment)
-        == "wb_ostatki_Склад_Москва_20240102_1530.csv"
+        == "wb_ostatki_Склад_Москва_20240102_1530.xlsx"
     )

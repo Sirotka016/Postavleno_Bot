@@ -2,14 +2,29 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+
+@dataclass(slots=True)
+class ScreenState:
+    name: str
+    params: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
 class ChatSession:
     last_bot_message_id: int | None = None
+    history: list[ScreenState] = field(default_factory=list)
+    # WB
     stocks_wh_map: dict[str, str] = field(default_factory=dict)
     stocks_view: str | None = None  # "ALL" | "wh:abcd1234" | "summary" | None
     stocks_page: int = 1  # current page (>=1)
+    # LOCAL
+    local_uploaded_wb: Path | None = None
+    local_uploaded_local: Path | None = None
+    local_join_ready: bool = False
+    local_page: int = 1
 
 
 class SessionStorage:
@@ -46,3 +61,25 @@ class SessionStorage:
 
 
 session_storage = SessionStorage()
+
+
+def nav_push(session: ChatSession, screen: ScreenState) -> None:
+    session.history.append(screen)
+
+
+def nav_replace(session: ChatSession, screen: ScreenState) -> None:
+    if session.history:
+        session.history[-1] = screen
+    else:
+        session.history.append(screen)
+
+
+def nav_back(session: ChatSession) -> ScreenState | None:
+    if not session.history:
+        return None
+
+    if len(session.history) == 1:
+        return session.history[0]
+
+    session.history.pop()
+    return session.history[-1]

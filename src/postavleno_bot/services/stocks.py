@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-import csv
 import re
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from io import StringIO
 
+import pandas as pd
 import structlog
 
 from ..integrations.wb_client import WBStockItem, fetch_stocks_all
+from .export import dataframe_to_xlsx_bytes
 
 _CACHE_TTL = timedelta(seconds=45)
 _RATE_LIMIT_WINDOW = timedelta(minutes=1)
@@ -199,29 +199,31 @@ def _sort_for_export(items: list[WBStockItem]) -> list[WBStockItem]:
     )
 
 
-def build_export_csv(items: list[WBStockItem]) -> bytes:
-    buffer = StringIO()
-    writer = csv.writer(buffer, delimiter=";", lineterminator="\n")
-    writer.writerow(EXPORT_HEADERS)
-
+def build_export_dataframe(items: list[WBStockItem]) -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
     for item in _sort_for_export(items):
-        writer.writerow(
-            [
-                item.warehouseName,
-                item.supplierArticle,
-                item.nmId,
-                item.barcode,
-                item.quantity,
-                item.category or "",
-                item.subject or "",
-                item.brand or "",
-                item.techSize or "",
-                item.price or "",
-                item.discount or "",
-            ]
+        rows.append(
+            {
+                "Склад": item.warehouseName,
+                "Артикул": item.supplierArticle,
+                "nmId": item.nmId,
+                "Штрихкод": item.barcode,
+                "Кол-во": item.quantity,
+                "Категория": item.category or "",
+                "Предмет": item.subject or "",
+                "Бренд": item.brand or "",
+                "Размер": item.techSize or "",
+                "Цена": item.price or "",
+                "Скидка": item.discount or "",
+            }
         )
 
-    return buffer.getvalue().encode("utf-8")
+    return pd.DataFrame(rows, columns=EXPORT_HEADERS)
+
+
+def build_export_xlsx(items: list[WBStockItem]) -> bytes:
+    dataframe = build_export_dataframe(items)
+    return dataframe_to_xlsx_bytes(dataframe)
 
 
 def sanitize_filename(value: str) -> str:
@@ -234,10 +236,10 @@ def build_export_filename(view: str, warehouse: str | None, moment: datetime) ->
     timestamp = moment.strftime("%Y%m%d_%H%M")
 
     if view == "ALL":
-        return f"wb_ostatki_ALL_{timestamp}.csv"
+        return f"wb_ostatki_ALL_{timestamp}.xlsx"
 
     if warehouse:
         sanitized = sanitize_filename(warehouse)
-        return f"wb_ostatki_{sanitized}_{timestamp}.csv"
+        return f"wb_ostatki_{sanitized}_{timestamp}.xlsx"
 
-    return f"wb_ostatki_{timestamp}.csv"
+    return f"wb_ostatki_{timestamp}.xlsx"
