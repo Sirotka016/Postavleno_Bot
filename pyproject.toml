@@ -1,0 +1,61 @@
+[project]
+name = "postavleno-bot"
+version = "0.1.0"
+description = "Асинхронный Telegram-бот Postavleno"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "aiogram>=3.4,<4.0",
+    "structlog>=24.1,<25.0",
+    "pydantic>=2.6,<3.0",
+    "pydantic-settings>=2.6,<3.0",
+    "rich>=13.8,<14.0",
+    "orjson>=3.10,<4.0",
+]
+
+[build-system]
+requires = ["setuptools>=69.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+packages = ["postavleno_bot"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+select = [
+    "E",
+    "F",
+    "I",
+    "B",
+    "UP",
+    "N",
+    "S",
+    "W",
+]
+ignore = ["S101"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_configs = true
+warn_return_any = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+strict_optional = true
+no_implicit_optional = true
+show_error_codes = true
+mypy_path = ["src"]
+namespace_packages = false
+explicit_package_bases = true
+plugins = []
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+addopts = "-q"
+testpaths = ["tests"]
