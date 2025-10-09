@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import os
 import sys
 from types import SimpleNamespace
+
+from postavleno_bot.core.config import get_settings
+
+os.environ.setdefault("TELEGRAM_BOT_TOKEN", "TEST:TOKEN")
+get_settings.cache_clear()
 
 if "httpx" not in sys.modules:
 

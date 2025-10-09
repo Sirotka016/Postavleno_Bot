@@ -23,11 +23,9 @@ from structlog.stdlib import BoundLogger
 from ..core.config import get_settings
 from ..core.logging import get_logger
 from ..integrations.wb_client import WBApiError, WBAuthError, WBRatelimitError, WBStockItem
-from ..services.export import dataframe_to_xlsx_bytes
 from ..services.local import (
     LocalFileError,
     LocalJoinStats,
-    build_local_only_dataframe,
     build_local_preview,
     classify_dataframe,
     dataframe_from_bytes,
@@ -92,7 +90,7 @@ SCREEN_LOCAL_OPEN = "LOCAL_OPEN"
 SCREEN_LOCAL_UPLOAD = "LOCAL_UPLOAD"
 SCREEN_LOCAL_VIEW = "LOCAL_VIEW"
 
-LOCAL_UPLOAD_HINT_TEXT = "Сейчас я жду файлы Excel: WB и Склад. Пришлите их документом."
+LOCAL_UPLOAD_HINT_TEXT = "Жду два файла Excel: WB (все склады) и Склад. Пришлите документы."
 LOCAL_UPLOAD_PROGRESS_TEXT = "Получаю файл…"
 
 
@@ -460,17 +458,6 @@ def _checkbox(value: bool) -> str:
     return "✅" if value else "⬜"
 
 
-def _format_local_summary(stats: LocalJoinStats) -> str:
-    store_name = get_settings().local_store_name
-    return (
-        "✅ Оба файла загружены. Итог готов.\n"
-        f"• Уникальных артикулов WB: {stats.wb_unique}\n"
-        f"• Совпадений с локальным складом: {stats.matched_rows}\n"
-        "• Колонки: "
-        f"Склад={store_name}, Артикул, nmId, Штрихкод, Кол-во_наш_склад, Категория, Предмет, Бренд, Размер, Цена, Скидка"
-    )
-
-
 def build_local_upload_text(
     *,
     wb_uploaded: bool,
@@ -484,12 +471,8 @@ def build_local_upload_text(
         f"{_checkbox(wb_uploaded)} Файл Wildberries (.xlsx/.xls/.csv) — Артикул + Количество",
         f"{_checkbox(local_uploaded)} Файл склада (.xlsx/.xls/.csv) — Артикул + Количество",
         "",
-        "После загрузки двух файлов я очищу WB от дублей по артикулу и добавлю колонку количества с нашего склада.",
+        "Пришлите оба файла подряд. Кнопка «📤 Загрузить Остатки» будет доступна снова после выхода из режима загрузки.",
     ]
-
-    if stats:
-        lines.append("")
-        lines.append(_format_local_summary(stats))
 
     if message:
         lines.append("")
@@ -506,9 +489,6 @@ def build_local_upload_keyboard(*, ready: bool) -> InlineKeyboardMarkup:
         )
 
     inline_keyboard.append(
-        [InlineKeyboardButton(text="📤 Загрузить Остатки", callback_data=LOCAL_UPLOAD_CALLBACK)]
-    )
-    inline_keyboard.append(
         [
             InlineKeyboardButton(text="🔄 Обновить", callback_data=LOCAL_REFRESH_CALLBACK),
             InlineKeyboardButton(text="⬅️ Назад", callback_data=LOCAL_BACK_CALLBACK),
@@ -520,19 +500,30 @@ def build_local_upload_keyboard(*, ready: bool) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
 
 
-def build_local_export_text(summary_lines: list[str], preview_lines: list[str], total: int) -> str:
+def build_local_result_text(stats: LocalJoinStats, preview_lines: list[str], total: int) -> str:
+    store_name = get_settings().local_store_name
     shown = min(len(preview_lines), total)
-    blocks: list[str] = ["<b>🏭 Остатки склада — итог</b>"]
-
-    if summary_lines:
-        blocks.append("\n".join(summary_lines))
+    lines = [
+        "<b>✅ Итог готов</b>",
+        "",
+        f"• Строк в файле WB: {stats.wb_rows}",
+        f"• Уникальных артикулов WB: {stats.wb_unique}",
+        f"• Строк файла склада: {stats.local_rows}",
+        f"• Совпадений по артикулу: {stats.matched_rows}",
+        "",
+        "Файл готов к выгрузке:",
+        "Склад="
+        f"{store_name}, Артикул, nmId, Штрихкод, Кол-во_наш_склад, Категория, Предмет, Бренд, Размер, Цена, Скидка.",
+        "Нажмите «⬇️ Выгрузить», чтобы скачать Excel.",
+    ]
 
     if preview_lines:
-        blocks.append("<b>Первые позиции:</b>")
-        blocks.append("\n".join(preview_lines))
+        lines.append("")
+        lines.append("<b>Первые позиции:</b>")
+        lines.append("\n".join(preview_lines))
+        lines.append(f"<i>Показаны первые {shown} из {total}</i>")
 
-    blocks.append(f"<i>Показаны первые {shown} из {total}</i>")
-    return "\n\n".join(blocks)
+    return "\n".join(lines)
 
 
 def _warehouse_code(name: str) -> str:
@@ -905,13 +896,14 @@ async def _render_local_home(
 ) -> int | None:
     session = await _ensure_session(chat_id)
     status = _local_status(session)
-    has_export = status["ready"] or status["local"]
+    has_export = status["ready"]
     state = ScreenState(name=SCREEN_LOCAL_OPEN, params={})
     if nav_action == "push":
         nav_push(session, state)
     else:
         nav_replace(session, state)
     await session_storage.update_session(chat_id, expecting_upload=False)
+    session.expecting_upload = False
     return await _render_card(
         bot=bot,
         chat_id=chat_id,
@@ -942,6 +934,7 @@ async def _render_local_upload(
     else:
         nav_replace(session, state)
     await session_storage.update_session(chat_id, expecting_upload=True)
+    session.expecting_upload = True
     text = build_local_upload_text(
         wb_uploaded=status["wb"],
         local_uploaded=status["local"],
@@ -965,6 +958,23 @@ async def _render_local_preview(
     nav_action: str,
     stats: LocalJoinStats | None = None,
 ) -> int | None:
+    return await _render_local_result(
+        bot,
+        chat_id,
+        dataframe,
+        nav_action=nav_action,
+        stats=stats,
+    )
+
+
+async def _render_local_result(
+    bot: Bot,
+    chat_id: int,
+    dataframe,
+    *,
+    nav_action: str,
+    stats: LocalJoinStats | None = None,
+) -> int | None:
     session = await _ensure_session(chat_id)
     state = ScreenState(name=SCREEN_LOCAL_VIEW, params={})
     if nav_action == "push":
@@ -976,11 +986,14 @@ async def _render_local_preview(
     if summary is None and isinstance(session.local_stats, LocalJoinStats):
         summary = session.local_stats
 
-    summary_lines = _format_local_summary(summary).splitlines() if summary is not None else []
+    if summary is None:
+        summary = LocalJoinStats(wb_rows=0, wb_unique=0, local_rows=0, matched_rows=0)
+
     lines, total = build_local_preview(dataframe)
-    text = build_local_export_text(summary_lines, lines, total)
-    keyboard = build_local_menu_keyboard(has_export=True)
+    text = build_local_result_text(summary, lines, total)
+    keyboard = build_local_upload_keyboard(ready=True)
     await session_storage.update_session(chat_id, expecting_upload=False)
+    session.expecting_upload = False
     return await _render_card(
         bot=bot,
         chat_id=chat_id,
@@ -1780,16 +1793,21 @@ async def handle_local_back(
         chat_id = callback.message.chat.id
         session = await _ensure_session(chat_id)
         current = session.history[-1] if session.history else None
-        previous = nav_back(session)
-        if current and current.name == SCREEN_LOCAL_VIEW:
-            message_id = await _render_local_upload(bot, chat_id, nav_action="push")
-            screen = SCREEN_LOCAL_UPLOAD
-        elif previous is None:
-            message_id = await _render_main_menu(bot, chat_id)
-            screen = SCREEN_MAIN
+
+        if current and current.name in {SCREEN_LOCAL_UPLOAD, SCREEN_LOCAL_VIEW}:
+            message_id = await _render_local_home(bot, chat_id, nav_action="replace")
+            screen = SCREEN_LOCAL_OPEN
         else:
-            message_id = await _render_state(bot, chat_id, previous)
-            screen = previous.name
+            previous = nav_back(session)
+            if previous is None:
+                message_id = await _render_main_menu(bot, chat_id)
+                screen = SCREEN_MAIN
+            else:
+                message_id = await _render_state(bot, chat_id, previous)
+                screen = previous.name
+
+        await session_storage.update_session(chat_id, expecting_upload=False)
+        session.expecting_upload = False
 
         success = message_id is not None
         latency_ms = _calc_latency(started_at)
@@ -1808,7 +1826,7 @@ async def handle_local_back(
 async def handle_local_upload_button(
     callback: CallbackQuery, bot: Bot, request_id: str, started_at: float
 ) -> None:
-    with _action_logger("local.upload", request_id) as logger:
+    with _action_logger("local_upload_open", request_id) as logger:
         logger = _bind_screen(logger, SCREEN_LOCAL_UPLOAD)
         logger.info("Переход на экран загрузки локальных остатков")
 
@@ -1849,17 +1867,44 @@ async def handle_local_export(
 
         result_latest = Path(f"data/local/{chat_id}/result.xlsx")
         stats = session.local_stats if isinstance(session.local_stats, LocalJoinStats) else None
-        if session.local_join_ready and result_latest.exists():
+
+        if not session.local_join_ready:
+            await callback.answer("Сначала загрузите два файла", show_alert=True)
+            metadata = {
+                "result": "not_ready",
+                "wb_rows": 0,
+                "wb_unique": 0,
+                "local_rows": 0,
+                "matched_rows": 0,
+                "result_path": None,
+                "file_ext": None,
+                "file_size": 0,
+            }
+        elif not result_latest.exists():
+            await callback.answer("Нет готового файла", show_alert=True)
+            metadata = {
+                "result": "missing",
+                "wb_rows": 0,
+                "wb_unique": 0,
+                "local_rows": 0,
+                "matched_rows": 0,
+                "result_path": str(result_latest),
+                "file_ext": None,
+                "file_size": 0,
+            }
+        else:
             dataframe = load_latest(chat_id, "result")
             if dataframe is None or dataframe.empty:
                 await callback.answer("Нет готового файла", show_alert=True)
                 metadata = {
-                    "result": "missing",
-                    "wb_rows": 0,
-                    "wb_unique": 0,
-                    "local_rows": 0,
-                    "matched_rows": 0,
+                    "result": "empty",
+                    "wb_rows": stats.wb_rows if stats else 0,
+                    "wb_unique": stats.wb_unique if stats else 0,
+                    "local_rows": stats.local_rows if stats else 0,
+                    "matched_rows": stats.matched_rows if stats else 0,
                     "result_path": str(result_latest),
+                    "file_ext": None,
+                    "file_size": 0,
                 }
             else:
                 filename = f"wb_local_merged_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
@@ -1867,7 +1912,7 @@ async def handle_local_export(
                     chat_id=chat_id,
                     document=BufferedInputFile(result_latest.read_bytes(), filename),
                 )
-                await _render_local_preview(
+                await _render_local_result(
                     bot, chat_id, dataframe, nav_action="replace", stats=stats
                 )
                 await callback.answer("Файл отправлен")
@@ -1879,47 +1924,11 @@ async def handle_local_export(
                     "local_rows": stats.local_rows if stats else 0,
                     "matched_rows": stats.matched_rows if stats else 0,
                     "result_path": str(result_latest),
-                }
-        else:
-            dataframe = build_local_only_dataframe(chat_id)
-            if dataframe is None or dataframe.empty:
-                await callback.answer("Загрузите файл склада", show_alert=True)
-                metadata = {
-                    "result": "empty",
-                    "wb_rows": 0,
-                    "wb_unique": 0,
-                    "local_rows": 0,
-                    "matched_rows": 0,
-                    "result_path": None,
-                }
-            else:
-                filename = "local_stock.xlsx"
-                await bot.send_document(
-                    chat_id=chat_id,
-                    document=BufferedInputFile(dataframe_to_xlsx_bytes(dataframe), filename),
-                )
-                preview_df = dataframe.rename(columns={"Количество": "Кол-во_наш_склад"})
-                lines, total = build_local_preview(preview_df)
-                reminder = ["Загрузите выгрузку Wildberries, чтобы построить итоговый файл."]
-                text = build_local_export_text(reminder, lines, total)
-                await _render_card(
-                    bot=bot,
-                    chat_id=chat_id,
-                    text=text,
-                    inline_markup=build_local_menu_keyboard(has_export=True),
-                )
-                await callback.answer("Файл отправлен")
-                metadata = {
-                    "result": "local_only",
-                    "items": total,
-                    "wb_rows": 0,
-                    "wb_unique": 0,
-                    "local_rows": len(dataframe),
-                    "matched_rows": 0,
-                    "result_path": None,
+                    "file_ext": ".xlsx",
+                    "file_size": result_latest.stat().st_size if result_latest.exists() else 0,
                 }
 
-        success = metadata.get("result") != "empty"
+        success = metadata.get("result") == "sent"
         latency_ms = _calc_latency(started_at)
         structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
         logger = _bind_screen(logger, SCREEN_LOCAL_VIEW)
@@ -1928,6 +1937,7 @@ async def handle_local_export(
             result="ok" if success else "fail",
             message_id=None,
             **metadata,
+            expecting_upload=session.expecting_upload,
         )
         structlog.contextvars.unbind_contextvars("latency_ms")
 
@@ -1936,33 +1946,44 @@ async def handle_local_export(
 async def handle_local_document(
     message: Message, bot: Bot, request_id: str, started_at: float
 ) -> None:
-    with _action_logger("local_document", request_id) as logger:
+    with _action_logger("local_doc_received", request_id) as logger:
         chat_id = message.chat.id
         session = await _ensure_session(chat_id)
-        on_upload_screen = bool(session.history and session.history[-1].name == SCREEN_LOCAL_UPLOAD)
-        if not on_upload_screen:
-            await maybe_delete_user_message(
-                bot=bot,
-                message=message,
-                session=session,
-                logger=logger,
-            )
-            logger.warning(
-                "Документ получен вне экрана загрузки",
-                result="skip",
-                expecting_upload=session.expecting_upload,
-            )
-            return
-
-        await maybe_delete_user_message(
-            bot=bot,
-            message=message,
-            session=session,
-            logger=logger,
-        )
-
         document = message.document
         if document is None:
+            return
+
+        file_name = document.file_name or "uploaded.xlsx"
+        file_ext = Path(file_name).suffix.lower()
+        file_size = getattr(document, "file_size", 0) or 0
+        expecting = session.expecting_upload
+        empty_stats = {
+            "wb_rows": 0,
+            "wb_unique": 0,
+            "local_rows": 0,
+            "matched_rows": 0,
+            "result_path": None,
+        }
+
+        logger.info(
+            "Получен документ",
+            file_ext=file_ext,
+            file_size=file_size,
+            classified_as=None,
+            expecting_upload=expecting,
+            **empty_stats,
+        )
+
+        if not expecting:
+            logger.warning(
+                "Документ получен вне режима загрузки",
+                result="skip",
+                file_ext=file_ext,
+                file_size=file_size,
+                classified_as=None,
+                expecting_upload=expecting,
+                **empty_stats,
+            )
             return
 
         await _render_local_upload(
@@ -1979,7 +2000,11 @@ async def handle_local_document(
                 "Не удалось скачать документ",
                 err=str(error),
                 result="fail",
+                file_ext=file_ext,
+                file_size=file_size,
+                classified_as=None,
                 expecting_upload=session.expecting_upload,
+                **empty_stats,
             )
             await _render_local_upload(
                 bot,
@@ -1989,9 +2014,25 @@ async def handle_local_document(
             )
             return
 
-        assert file_data is not None
+        if file_data is None:
+            logger.error(
+                "Бот не вернул данные файла",
+                result="fail",
+                file_ext=file_ext,
+                file_size=file_size,
+                classified_as=None,
+                expecting_upload=session.expecting_upload,
+                **empty_stats,
+            )
+            await _render_local_upload(
+                bot,
+                chat_id,
+                nav_action="replace",
+                message="Не удалось получить файл. Попробуйте ещё раз.",
+            )
+            return
+
         content = file_data.read()
-        file_name = document.file_name or "uploaded.xlsx"
 
         try:
             dataframe = dataframe_from_bytes(content, file_name)
@@ -2000,7 +2041,11 @@ async def handle_local_document(
                 "Файл не распознан",
                 err=str(error),
                 result="fail",
+                file_ext=file_ext,
+                file_size=file_size,
+                classified_as="UNKNOWN",
                 expecting_upload=session.expecting_upload,
+                **empty_stats,
             )
             await _render_local_upload(
                 bot,
@@ -2011,8 +2056,7 @@ async def handle_local_document(
             return
 
         classification = classify_dataframe(dataframe)
-        class_logger = get_logger(__name__).bind(action="local_classify", request_id=request_id)
-        stats: LocalJoinStats | None = None
+        class_logger = get_logger(__name__).bind(action="local_classified", request_id=request_id)
         message_text: str | None = None
 
         if classification == "WB":
@@ -2020,27 +2064,35 @@ async def handle_local_document(
             session.local_uploaded_wb = Path(f"data/local/{chat_id}/wb.xlsx")
             class_logger.info(
                 "Файл распознан как WB",
+                file_ext=file_ext,
+                file_size=file_size,
                 rows=len(dataframe),
-                columns=list(dataframe.columns),
+                classified_as="WB",
                 expecting_upload=session.expecting_upload,
             )
+            message_text = "WB загружен. Теперь пришлите файл склада."
         elif classification == "LOCAL":
             save_local_upload(chat_id, dataframe)
             session.local_uploaded_local = Path(f"data/local/{chat_id}/local.xlsx")
             class_logger.info(
                 "Файл распознан как локальный склад",
+                file_ext=file_ext,
+                file_size=file_size,
                 rows=len(dataframe),
-                columns=list(dataframe.columns),
+                classified_as="LOCAL",
                 expecting_upload=session.expecting_upload,
             )
+            message_text = "Файл склада получен. Жду выгрузку WB."
         else:
             session.local_join_ready = False
             session.local_stats = None
             message_text = "Не узнаю формат. Нужны столбцы Артикул и Количество для обоих файлов."
             class_logger.warning(
                 "Файл не классифицирован",
+                file_ext=file_ext,
+                file_size=file_size,
                 rows=len(dataframe),
-                columns=list(dataframe.columns),
+                classified_as="UNKNOWN",
                 expecting_upload=session.expecting_upload,
             )
             await _render_local_upload(
@@ -2053,12 +2105,19 @@ async def handle_local_document(
             structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
             logger = _bind_screen(logger, SCREEN_LOCAL_UPLOAD)
             logger.info(
-                "Документ отклонён",
+                "Документ обработан",
                 result="fail",
+                classified_as="UNKNOWN",
+                file_ext=file_ext,
+                file_size=file_size,
                 expecting_upload=session.expecting_upload,
+                **empty_stats,
             )
             structlog.contextvars.unbind_contextvars("latency_ms")
             return
+
+        session.local_join_ready = False
+        session.local_stats = None
 
         status = _local_status(session)
         if status["wb"] and status["local"]:
@@ -2080,10 +2139,28 @@ async def handle_local_document(
                     local_rows=stats.local_rows,
                     matched_rows=stats.matched_rows,
                     result_path=str(result_path),
+                    file_ext=file_ext,
+                    file_size=file_size,
+                    classified_as=classification,
                     expecting_upload=session.expecting_upload,
                 )
-                await _render_local_preview(
+                await _render_local_result(
                     bot, chat_id, result_df, nav_action="replace", stats=stats
+                )
+                result_logger = get_logger(__name__).bind(
+                    action="local_result", request_id=request_id
+                )
+                result_logger.info(
+                    "Итог построен",
+                    wb_rows=stats.wb_rows,
+                    wb_unique=stats.wb_unique,
+                    local_rows=stats.local_rows,
+                    matched_rows=stats.matched_rows,
+                    result_path=str(result_path),
+                    file_ext=file_ext,
+                    file_size=file_size,
+                    classified_as=classification,
+                    expecting_upload=session.expecting_upload,
                 )
                 latency_ms = _calc_latency(started_at)
                 structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
@@ -2091,17 +2168,15 @@ async def handle_local_document(
                 logger.info(
                     "Документ обработан",
                     result="ok",
+                    classified_as=classification,
+                    file_ext=file_ext,
+                    file_size=file_size,
                     expecting_upload=session.expecting_upload,
                 )
                 structlog.contextvars.unbind_contextvars("latency_ms")
                 return
-            message_text = "Не удалось прочитать загруженные данные. Попробуйте ещё раз."
-            session.local_join_ready = False
-            session.local_stats = None
 
-        else:
-            session.local_join_ready = False
-            session.local_stats = None
+            message_text = "Не удалось прочитать загруженные данные. Попробуйте ещё раз."
 
         await _render_local_upload(
             bot,
@@ -2116,6 +2191,10 @@ async def handle_local_document(
         logger.info(
             "Документ обработан",
             result="ok",
+            classified_as=classification,
+            file_ext=file_ext,
+            file_size=file_size,
             expecting_upload=session.expecting_upload,
+            **empty_stats,
         )
         structlog.contextvars.unbind_contextvars("latency_ms")
