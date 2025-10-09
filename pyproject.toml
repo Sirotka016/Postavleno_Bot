@@ -27,19 +27,16 @@ line-length = 100
 target-version = ["py311"]
 
 [tool.ruff]
+target-version = "py314"
 line-length = 100
 src = ["src", "tests"]
-select = [
-    "E",
-    "F",
-    "I",
-    "B",
-    "UP",
-    "N",
-    "S",
-    "W",
-]
-ignore = ["S101"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "preserve"
 
 [tool.mypy]
 python_version = "3.11"
@@ -51,7 +48,7 @@ strict_optional = true
 no_implicit_optional = true
 show_error_codes = true
 mypy_path = ["src"]
-namespace_packages = false
+namespace_packages = true
 explicit_package_bases = true
 plugins = []
 

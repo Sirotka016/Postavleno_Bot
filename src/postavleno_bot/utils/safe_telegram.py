@@ -1,21 +1,18 @@
 from __future__ import annotations
 
-from typing import Optional
-
+import structlog
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.types import InlineKeyboardMarkup, Message, ReplyKeyboardMarkup, ReplyKeyboardRemove
-import structlog
-
 
 _NOT_MODIFIED_SUBSTRING = "message is not modified"
 
 
-def _is_not_modified_error(error: TelegramBadRequest) -> bool:
+def is_not_modified_error(exc_or_text: Exception | str) -> bool:
     """Return ``True`` if Telegram reports that message is not modified."""
 
-    message = str(error)
-    return _NOT_MODIFIED_SUBSTRING in message.lower()
+    text = str(exc_or_text) if not isinstance(exc_or_text, str) else exc_or_text
+    return _NOT_MODIFIED_SUBSTRING in text.lower()
 
 
 async def safe_send(
@@ -24,7 +21,7 @@ async def safe_send(
     text: str,
     *,
     reply_markup: ReplyKeyboardMarkup | ReplyKeyboardRemove | InlineKeyboardMarkup | None = None,
-) -> Optional[Message]:
+) -> Message | None:
     logger = structlog.get_logger(__name__).bind(action="send_message")
     try:
         result = await bot.send_message(
@@ -48,7 +45,7 @@ async def safe_edit(
     text: str,
     *,
     inline_markup: InlineKeyboardMarkup | None = None,
-) -> Optional[Message]:
+) -> Message | None:
     logger = structlog.get_logger(__name__).bind(action="edit_message")
     try:
         result = await bot.edit_message_text(
@@ -62,7 +59,7 @@ async def safe_edit(
             return result
         return None
     except TelegramBadRequest as error:
-        if _is_not_modified_error(error):
+        if is_not_modified_error(error):
             logger.debug("Сообщение не изменилось")
             return None
         logger.warning("Не удалось изменить сообщение", error=str(error))

@@ -28,4 +28,4 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Return a cached instance of :class:`Settings`."""
 
-    return Settings()
+    return Settings()  # type: ignore[call-arg]

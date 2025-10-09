@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable, Dict
+from collections.abc import Awaitable, Callable
+from contextlib import suppress
+from typing import Any
 
+import structlog
 from aiogram import BaseMiddleware
 from aiogram.types import CallbackQuery, Message, TelegramObject
-import structlog
 
 
 class UserContextMiddleware(BaseMiddleware):
@@ -12,12 +14,12 @@ class UserContextMiddleware(BaseMiddleware):
 
     async def __call__(
         self,
-        handler: Callable[[TelegramObject, Dict[str, Any]], Awaitable[Any]],
+        handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]],
         event: TelegramObject,
-        data: Dict[str, Any],
+        data: dict[str, Any],
     ) -> Any:
-        chat_id = None
-        user_id = None
+        chat_id: int | None = None
+        user_id: int | None = None
         update_type = event.__class__.__name__.lower()
 
         if isinstance(event, Message):
@@ -39,7 +41,5 @@ class UserContextMiddleware(BaseMiddleware):
             return await handler(event, data)
         finally:
             for key in ("update_type", "user_id", "chat_id"):
-                try:
+                with suppress(LookupError):
                     structlog.contextvars.unbind_contextvars(key)
-                except LookupError:
-                    pass

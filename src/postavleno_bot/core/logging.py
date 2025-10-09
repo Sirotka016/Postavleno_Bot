@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Callable
+from collections.abc import MutableMapping
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import orjson
 import structlog
 from rich.console import Console
 from rich.logging import RichHandler
+from structlog.typing import Processor
 
 _LOG_LEVEL_EMOJI = {
     "debug": "🔍",
@@ -33,7 +34,9 @@ _JSON_FIELDS = (
 )
 
 
-def _default_field_enricher(_: structlog.types.WrappedLogger, __: str, event_dict: dict[str, Any]) -> dict[str, Any]:
+def _default_field_enricher(
+    _: structlog.types.WrappedLogger, __: str, event_dict: MutableMapping[str, Any]
+) -> MutableMapping[str, Any]:
     for field in _JSON_FIELDS:
         event_dict.setdefault(field, None)
     event_dict.setdefault("msg", event_dict.get("event"))
@@ -41,13 +44,17 @@ def _default_field_enricher(_: structlog.types.WrappedLogger, __: str, event_dic
     return event_dict
 
 
-def _event_to_message(_: structlog.types.WrappedLogger, __: str, event_dict: dict[str, Any]) -> dict[str, Any]:
+def _event_to_message(
+    _: structlog.types.WrappedLogger, __: str, event_dict: MutableMapping[str, Any]
+) -> MutableMapping[str, Any]:
     if "event" in event_dict and event_dict.get("msg") is None:
         event_dict["msg"] = event_dict.pop("event")
     return event_dict
 
 
-def _console_renderer(_: structlog.types.WrappedLogger, __: str, event_dict: dict[str, Any]) -> str:
+def _console_renderer(
+    _: structlog.types.WrappedLogger, __: str, event_dict: MutableMapping[str, Any]
+) -> str:
     level = str(event_dict.get("level", "info")).lower()
     emoji = _LOG_LEVEL_EMOJI.get(level, "🟢")
     timestamp = event_dict.get("ts", "")
@@ -62,7 +69,9 @@ def _console_renderer(_: structlog.types.WrappedLogger, __: str, event_dict: dic
     return f"{timestamp} {emoji} {logger_name}: {message}{context}"
 
 
-def _json_renderer(_: structlog.types.WrappedLogger, __: str, event_dict: dict[str, Any]) -> str:
+def _json_renderer(
+    _: structlog.types.WrappedLogger, __: str, event_dict: MutableMapping[str, Any]
+) -> str:
     return orjson.dumps(event_dict, option=orjson.OPT_APPEND_NEWLINE).decode()
 
 
@@ -106,12 +115,12 @@ def setup_logging(
     else:
         numeric_level = int(level)
 
-    processors: list[Callable[..., Any]] = [
+    processors: list[Processor] = [
         structlog.contextvars.merge_contextvars,
         structlog.processors.add_log_level,
         structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S", utc=False, key="ts"),
-        structlog.processors.StackInfoRenderer(key="stack"),
-        structlog.processors.format_exc_info(key="exception"),
+        structlog.processors.StackInfoRenderer(),
+        structlog.processors.format_exc_info,
         _default_field_enricher,
         _event_to_message,
     ]
@@ -128,7 +137,7 @@ def setup_logging(
     root_logger.handlers.clear()
     root_logger.setLevel(numeric_level)
 
-    foreign_pre_chain = list(processors)
+    foreign_pre_chain: list[Processor] = list(processors)
 
     if rich_enabled:
         console_handler = _create_rich_handler()
@@ -136,7 +145,10 @@ def setup_logging(
         console_handler.setFormatter(
             structlog.stdlib.ProcessorFormatter(
                 foreign_pre_chain=foreign_pre_chain,
-                processors=[structlog.stdlib.ProcessorFormatter.remove_processors_meta, _console_renderer],
+                processors=[
+                    structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+                    _console_renderer,
+                ],
             )
         )
         root_logger.addHandler(console_handler)
@@ -147,13 +159,16 @@ def setup_logging(
         file_handler.setFormatter(
             structlog.stdlib.ProcessorFormatter(
                 foreign_pre_chain=foreign_pre_chain,
-                processors=[structlog.stdlib.ProcessorFormatter.remove_processors_meta, _json_renderer],
+                processors=[
+                    structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+                    _json_renderer,
+                ],
             )
         )
         root_logger.addHandler(file_handler)
 
     structlog.configure(
-        processors=processors,
+        processors=processors + [structlog.stdlib.ProcessorFormatter.wrap_for_formatter],
         logger_factory=structlog.stdlib.LoggerFactory(),
         wrapper_class=structlog.stdlib.BoundLogger,
         cache_logger_on_first_use=True,
@@ -161,4 +176,4 @@ def setup_logging(
 
 
 def get_logger(name: str | None = None) -> structlog.stdlib.BoundLogger:
-    return structlog.get_logger(name)
+    return cast(structlog.stdlib.BoundLogger, structlog.get_logger(name))
