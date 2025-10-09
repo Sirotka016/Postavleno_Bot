@@ -25,7 +25,7 @@ async def _on_startup(bot: Bot) -> None:
 
 def create_bot(settings: Settings) -> Bot:
     return Bot(
-        token=settings.bot_token,
+        token=settings.bot_token.get_secret_value(),
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
 
