@@ -38,7 +38,8 @@ class UserContextMiddleware(BaseMiddleware):
         try:
             return await handler(event, data)
         finally:
-            try:
-                structlog.contextvars.unbind_contextvars("chat_id", "user_id", "update_type")
-            except LookupError:
-                structlog.contextvars.clear_contextvars()
+            for key in ("update_type", "user_id", "chat_id"):
+                try:
+                    structlog.contextvars.unbind_contextvars(key)
+                except LookupError:
+                    pass

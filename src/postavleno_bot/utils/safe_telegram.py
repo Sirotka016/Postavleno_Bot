@@ -3,12 +3,22 @@ from __future__ import annotations
 from typing import Optional
 
 from aiogram import Bot
-from aiogram.exceptions import MessageNotModified, TelegramBadRequest, TelegramForbiddenError
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.types import InlineKeyboardMarkup, Message, ReplyKeyboardMarkup, ReplyKeyboardRemove
 import structlog
 
 
-async def safe_send_message(
+_NOT_MODIFIED_SUBSTRING = "message is not modified"
+
+
+def _is_not_modified_error(error: TelegramBadRequest) -> bool:
+    """Return ``True`` if Telegram reports that message is not modified."""
+
+    message = str(error)
+    return _NOT_MODIFIED_SUBSTRING in message.lower()
+
+
+async def safe_send(
     bot: Bot,
     chat_id: int,
     text: str,
@@ -31,7 +41,7 @@ async def safe_send_message(
         return None
 
 
-async def safe_edit_message_text(
+async def safe_edit(
     bot: Bot,
     chat_id: int,
     message_id: int,
@@ -51,34 +61,18 @@ async def safe_edit_message_text(
         if isinstance(result, Message):
             return result
         return None
-    except MessageNotModified:
-        logger.warning("Сообщение не изменилось")
+    except TelegramBadRequest as error:
+        if _is_not_modified_error(error):
+            logger.debug("Сообщение не изменилось")
+            return None
+        logger.warning("Не удалось изменить сообщение", error=str(error))
         return None
-    except (TelegramBadRequest, TelegramForbiddenError) as error:
+    except TelegramForbiddenError as error:
         logger.warning("Не удалось изменить сообщение", error=str(error))
         return None
 
 
-async def safe_edit_reply_markup(
-    bot: Bot,
-    chat_id: int,
-    message_id: int,
-    inline_markup: InlineKeyboardMarkup,
-) -> bool:
-    logger = structlog.get_logger(__name__).bind(action="edit_reply_markup")
-    try:
-        result = await bot.edit_message_reply_markup(
-            chat_id=chat_id,
-            message_id=message_id,
-            reply_markup=inline_markup,
-        )
-        return bool(result)
-    except (TelegramBadRequest, TelegramForbiddenError) as error:
-        logger.warning("Не удалось обновить кнопки", error=str(error))
-        return False
-
-
-async def safe_delete_message(bot: Bot, chat_id: int, message_id: int) -> bool:
+async def safe_delete(bot: Bot, chat_id: int, message_id: int) -> bool:
     logger = structlog.get_logger(__name__).bind(action="delete_message")
     try:
         await bot.delete_message(chat_id=chat_id, message_id=message_id)
