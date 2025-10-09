@@ -20,18 +20,21 @@ class UserContextMiddleware(BaseMiddleware):
     ) -> Any:
         chat_id: int | None = None
         user_id: int | None = None
-        update_type = event.__class__.__name__.lower()
+        update_type: str | None = None
 
         if isinstance(event, Message):
             chat_id = event.chat.id
             user_id = event.from_user.id if event.from_user else None
+            update_type = "message"
         elif isinstance(event, CallbackQuery):
             chat_id = event.message.chat.id if event.message else None
             user_id = event.from_user.id
+            update_type = "callback_query"
+        else:
+            update_type = event.__class__.__name__.lower()
 
         data["chat_id"] = chat_id
         data["user_id"] = user_id
-        data["update_type"] = update_type
         structlog.contextvars.bind_contextvars(
             chat_id=chat_id,
             user_id=user_id,
