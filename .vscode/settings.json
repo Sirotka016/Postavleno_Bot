@@ -1,0 +1,12 @@
+{
+  "python.defaultInterpreterPath": ".venv/Scripts/python.exe",
+  "terminal.integrated.env.windows": {
+    "PYTHONPATH": "${workspaceFolder}/src"
+  },
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.fixAll": "always",
+    "source.organizeImports.ruff": "explicit"
+  },
+  "ruff.fixOnSave": true
+}
