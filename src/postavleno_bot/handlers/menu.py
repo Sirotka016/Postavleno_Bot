@@ -22,26 +22,14 @@ from structlog.stdlib import BoundLogger
 
 from ..core.config import get_settings
 from ..core.logging import get_logger
+from ..integrations.moysklad import fetch_moysklad_stock_map
 from ..integrations.wb_client import WBApiError, WBAuthError, WBRatelimitError, WBStockItem
-from ..services.export import dataframe_to_xlsx_bytes
-from ..services.local import (
-    LocalFileError,
-    LocalJoinStats,
-    build_local_only_dataframe,
-    build_local_preview,
-    classify_dataframe,
-    dataframe_from_bytes,
-    load_latest,
-    merge_wb_with_local,
-    recompute_local_result,
-    save_local_upload,
-    save_result,
-    save_wb_upload,
-)
+from ..services.export import save_dataframe_to_xlsx
 from ..services.stocks import (
     TELEGRAM_TEXT_LIMIT,
     PagedView,
     WarehouseSummary,
+    build_export_dataframe,
     build_export_filename,
     build_export_xlsx,
     build_pages_grouped_by_warehouse,
@@ -49,6 +37,7 @@ from ..services.stocks import (
     get_stock_data,
     summarize_by_warehouse,
 )
+from ..services.store_stock_merge import merge_moysklad_into_wb
 from ..state.session import (
     ChatSession,
     ScreenState,
@@ -64,7 +53,7 @@ MENU_ROUTER = Router(name="menu")
 MAIN_REFRESH_CALLBACK = "main.refresh"
 MAIN_EXIT_CALLBACK = "main.exit"
 MAIN_STOCKS_CALLBACK = "main.stocks"
-MAIN_LOCAL_CALLBACK = "main.local"
+MAIN_STORE_CALLBACK = "main.store"
 
 STOCKS_OPEN_CALLBACK = "stocks.open"
 STOCKS_VIEW_CALLBACK = "stocks.view"
@@ -76,11 +65,10 @@ STOCKS_FILTER_ALL = f"{STOCKS_FILTER_PREFIX}ALL"
 STOCKS_PAGE_PREFIX = "stocks.page:"
 WAREHOUSE_KEY_PREFIX = "wh:"
 
-LOCAL_OPEN_CALLBACK = "local.open"
-LOCAL_REFRESH_CALLBACK = "local.refresh"
-LOCAL_BACK_CALLBACK = "local.back"
-LOCAL_EXPORT_CALLBACK = "local.export"
-LOCAL_UPLOAD_CALLBACK = "local.upload"
+STORE_GET_CALLBACK = "store_stock:get"
+STORE_REFRESH_CALLBACK = "refresh_menu"
+STORE_BACK_CALLBACK = "store.back"
+STORE_WAIT_CALLBACK = "store_stock:wait"
 
 SCREEN_MAIN = "MAIN"
 SCREEN_WB_OPEN = "WB_OPEN"
@@ -88,12 +76,7 @@ SCREEN_WB_LIST = "WB_LIST"
 SCREEN_WB_ALL = "WB_ALL"
 SCREEN_WB_WH = "WB_WH"
 SCREEN_WB_PAGE = "WB_PAGE"
-SCREEN_LOCAL_OPEN = "LOCAL_OPEN"
-SCREEN_LOCAL_UPLOAD = "LOCAL_UPLOAD"
-SCREEN_LOCAL_VIEW = "LOCAL_VIEW"
-
-LOCAL_UPLOAD_HINT_TEXT = "Сейчас я жду файлы Excel: WB и Склад. Пришлите их документом."
-LOCAL_UPLOAD_PROGRESS_TEXT = "Получаю файл…"
+SCREEN_STORE_OPEN = "STORE_OPEN"
 
 
 @contextmanager
@@ -118,7 +101,7 @@ def build_greeting_text(now: datetime | None = None) -> str:
         "Привет! 👋 Меня зовут <b>Postavleno_Bot</b>\n"
         "Помогаю с поставками на Wildberries: следите за обновлениями и возвращайтесь к карточке в один клик.\n\n"
         "Нажмите «📦 Остатки WB», чтобы увидеть остатки на складах Wildberries.\n\n"
-        "Нажмите «🏭 Остатки Склад», чтобы сверить свои остатки со складами WB.\n\n"
+        "Нажмите «🏬 Остатки Склад», чтобы сверить свои остатки со складами WB.\n\n"
         "Используйте кнопки под сообщением, чтобы обновить карточку или выйти.\n\n"
         f"<i>Обновлено: {timestamp}</i>"
     )
@@ -129,7 +112,7 @@ def build_main_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(text="📦 Остатки WB", callback_data=MAIN_STOCKS_CALLBACK),
-                InlineKeyboardButton(text="🏭 Остатки Склад", callback_data=MAIN_LOCAL_CALLBACK),
+                InlineKeyboardButton(text="🏬 Остатки Склад", callback_data=MAIN_STORE_CALLBACK),
             ],
             [
                 InlineKeyboardButton(text="🔄 Обновить", callback_data=MAIN_REFRESH_CALLBACK),
@@ -276,11 +259,118 @@ def build_warehouses_text(
     )
 
 
+def _warehouse_code(name: str) -> str:
+    checksum = binascii.crc32(name.encode("utf-8")) & 0xFFFFFFFF
+    return f"{WAREHOUSE_KEY_PREFIX}{checksum:08x}"
+
+
 def _build_warehouse_mapping(summaries: list[WarehouseSummary]) -> dict[str, str]:
     mapping: dict[str, str] = {}
     for summary in summaries:
         mapping[_warehouse_code(summary.name)] = summary.name
     return mapping
+
+
+async def _render_card(
+    *,
+    bot: Bot,
+    chat_id: int,
+    text: str,
+    inline_markup: InlineKeyboardMarkup,
+) -> int | None:
+    last_message_id = await session_storage.get_last_message_id(chat_id)
+
+    if last_message_id:
+        edited = await safe_edit(
+            bot,
+            chat_id=chat_id,
+            message_id=last_message_id,
+            text=text,
+            inline_markup=inline_markup,
+        )
+        if edited:
+            await session_storage.set_last_message_id(chat_id, edited.message_id)
+            return edited.message_id
+
+    message = await safe_send(
+        bot,
+        chat_id=chat_id,
+        text=text,
+        reply_markup=inline_markup,
+    )
+    if not message:
+        return None
+
+    await session_storage.set_last_message_id(chat_id, message.message_id)
+
+    if last_message_id and last_message_id != message.message_id:
+        await safe_delete(bot, chat_id=chat_id, message_id=last_message_id)
+
+    return message.message_id
+
+
+def _calc_latency(started_at: float) -> float:
+    return round((time.perf_counter() - started_at) * 1000, 2)
+
+
+def _bind_screen(logger: BoundLogger, screen: str) -> BoundLogger:
+    return logger.bind(screen=screen)
+
+
+async def _ensure_session(chat_id: int) -> ChatSession:
+    return await session_storage.get_session(chat_id)
+
+
+async def _load_stocks(token: str, *, force_refresh: bool) -> list[WBStockItem]:
+    return await get_stock_data(token, force_refresh=force_refresh)
+
+
+async def maybe_delete_user_message(
+    *, bot: Bot, message: Message, session: ChatSession, logger: BoundLogger | None = None
+) -> bool:
+    """Delete a user message if uploads are not expected."""
+
+    if session.expecting_upload:
+        if logger is not None:
+            logger.debug(
+                "user message preserved (expecting upload)",
+                expecting_upload=session.expecting_upload,
+            )
+        return False
+
+    await safe_delete(bot, chat_id=message.chat.id, message_id=message.message_id)
+    return True
+
+
+def _build_error_response(error: Exception) -> tuple[str, InlineKeyboardMarkup]:
+    if isinstance(error, WBAuthError):
+        return build_auth_error_text(), build_error_keyboard()
+    if isinstance(error, WBRatelimitError):
+        return build_rate_limit_text(error.retry_after), build_error_keyboard()
+    text = (
+        "<b>📦 Остатки на складах WB</b>\n\n"
+        "Не удалось получить остатки. Попробуйте обновить карточку позже."
+    )
+    return text, build_error_keyboard()
+
+
+async def _render_main_menu(bot: Bot, chat_id: int) -> int | None:
+    session = await _ensure_session(chat_id)
+    session.history.clear()
+    nav_replace(session, ScreenState(name=SCREEN_MAIN, params={}))
+    await session_storage.update_session(
+        chat_id,
+        stocks_view=None,
+        stocks_wh_map={},
+        stocks_page=1,
+        expecting_upload=False,
+    )
+    return await _render_card(
+        bot=bot,
+        chat_id=chat_id,
+        text=build_greeting_text(),
+        inline_markup=build_main_keyboard(),
+    )
 
 
 def page_buttons(current: int, total: int) -> list[list[InlineKeyboardButton]]:
@@ -422,227 +512,54 @@ def build_single_view_text(
     return text, total_pages, page_number
 
 
-def build_local_menu_text() -> str:
-    store_name = get_settings().local_store_name
-    return (
-        "<b>🏭 Остатки нашего склада</b>\n\n"
-        "Загрузите выгрузку Wildberries (все склады) и файл остатков своего склада.\n"
-        f"После обработки вы получите итоговую таблицу для склада <b>{store_name}</b> "
-        "с колонкой количества с нашего склада.\n\n"
-        "Нажмите «📤 Загрузить Остатки», чтобы добавить файлы."
-    )
-
-
-def build_local_menu_keyboard(*, has_export: bool) -> InlineKeyboardMarkup:
-    inline_keyboard: list[list[InlineKeyboardButton]] = []
-    if has_export:
-        inline_keyboard.append(
-            [InlineKeyboardButton(text="⬇️ Выгрузить", callback_data=LOCAL_EXPORT_CALLBACK)]
-        )
-
-    inline_keyboard.append(
-        [InlineKeyboardButton(text="📤 Загрузить Остатки", callback_data=LOCAL_UPLOAD_CALLBACK)]
-    )
-
-    inline_keyboard.append(
-        [
-            InlineKeyboardButton(text="🔄 Обновить", callback_data=LOCAL_REFRESH_CALLBACK),
-            InlineKeyboardButton(text="⬅️ Назад", callback_data=LOCAL_BACK_CALLBACK),
-        ]
-    )
-    inline_keyboard.append(
-        [InlineKeyboardButton(text="🚪 Выйти", callback_data=MAIN_EXIT_CALLBACK)]
-    )
-    return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
-
-
-def _checkbox(value: bool) -> str:
-    return "✅" if value else "⬜"
-
-
-def _format_local_summary(stats: LocalJoinStats) -> str:
-    store_name = get_settings().local_store_name
-    return (
-        "✅ Оба файла загружены. Итог готов.\n"
-        f"• Уникальных артикулов WB: {stats.wb_unique}\n"
-        f"• Совпадений с локальным складом: {stats.matched_rows}\n"
-        "• Колонки: "
-        f"Склад={store_name}, Артикул, nmId, Штрихкод, Кол-во_наш_склад, Категория, Предмет, Бренд, Размер, Цена, Скидка"
-    )
-
-
-def build_local_upload_text(
-    *,
-    wb_uploaded: bool,
-    local_uploaded: bool,
-    stats: LocalJoinStats | None = None,
-    message: str | None = None,
-) -> str:
+def build_store_menu_text(note: str | None = None) -> str:
     lines = [
-        "<b>📤 Загрузка остатков</b>",
+        "<b>🏬 Остатки склада</b>",
         "",
-        f"{_checkbox(wb_uploaded)} Файл Wildberries (.xlsx/.xls/.csv) — Артикул + Количество",
-        f"{_checkbox(local_uploaded)} Файл склада (.xlsx/.xls/.csv) — Артикул + Количество",
-        "",
-        "После загрузки двух файлов я очищу WB от дублей по артикулу и добавлю колонку количества с нашего склада.",
+        "Здесь я формирую файл, совпадающий со структурой выгрузки WB,",
+        "но с количеством с вашего склада (МойСклад).",
     ]
-
-    if stats:
-        lines.append("")
-        lines.append(_format_local_summary(stats))
-
-    if message:
-        lines.append("")
-        lines.append(message)
-
+    if note:
+        lines.extend(["", note])
     return "\n".join(lines)
 
 
-def build_local_upload_keyboard(*, ready: bool) -> InlineKeyboardMarkup:
-    inline_keyboard: list[list[InlineKeyboardButton]] = []
-    if ready:
-        inline_keyboard.append(
-            [InlineKeyboardButton(text="⬇️ Выгрузить", callback_data=LOCAL_EXPORT_CALLBACK)]
-        )
-
-    inline_keyboard.append(
-        [InlineKeyboardButton(text="📤 Загрузить Остатки", callback_data=LOCAL_UPLOAD_CALLBACK)]
+def build_store_menu_keyboard(*, loading: bool = False) -> InlineKeyboardMarkup:
+    first_button = InlineKeyboardButton(
+        text="⌛ Получаю…" if loading else "📊 Узнать Остатки",
+        callback_data=STORE_WAIT_CALLBACK if loading else STORE_GET_CALLBACK,
     )
-    inline_keyboard.append(
-        [
-            InlineKeyboardButton(text="🔄 Обновить", callback_data=LOCAL_REFRESH_CALLBACK),
-            InlineKeyboardButton(text="⬅️ Назад", callback_data=LOCAL_BACK_CALLBACK),
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [first_button],
+            [
+                InlineKeyboardButton(text="🔄 Обновить", callback_data=STORE_REFRESH_CALLBACK),
+                InlineKeyboardButton(text="⬅️ Назад", callback_data=STORE_BACK_CALLBACK),
+            ],
+            [InlineKeyboardButton(text="🚪 Выйти", callback_data=MAIN_EXIT_CALLBACK)],
         ]
     )
-    inline_keyboard.append(
-        [InlineKeyboardButton(text="🚪 Выйти", callback_data=MAIN_EXIT_CALLBACK)]
-    )
-    return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
 
 
-def build_local_export_text(summary_lines: list[str], preview_lines: list[str], total: int) -> str:
-    shown = min(len(preview_lines), total)
-    blocks: list[str] = ["<b>🏭 Остатки склада — итог</b>"]
-
-    if summary_lines:
-        blocks.append("\n".join(summary_lines))
-
-    if preview_lines:
-        blocks.append("<b>Первые позиции:</b>")
-        blocks.append("\n".join(preview_lines))
-
-    blocks.append(f"<i>Показаны первые {shown} из {total}</i>")
-    return "\n\n".join(blocks)
-
-
-def _warehouse_code(name: str) -> str:
-    checksum = binascii.crc32(name.encode("utf-8")) & 0xFFFFFFFF
-    return f"{WAREHOUSE_KEY_PREFIX}{checksum:08x}"
-
-
-async def _render_card(
-    *,
+async def _render_store_menu(
     bot: Bot,
     chat_id: int,
-    text: str,
-    inline_markup: InlineKeyboardMarkup,
+    *,
+    nav_action: str,
+    note: str | None = None,
 ) -> int | None:
-    last_message_id = await session_storage.get_last_message_id(chat_id)
-
-    if last_message_id:
-        edited = await safe_edit(
-            bot,
-            chat_id=chat_id,
-            message_id=last_message_id,
-            text=text,
-            inline_markup=inline_markup,
-        )
-        if edited:
-            await session_storage.set_last_message_id(chat_id, edited.message_id)
-            return edited.message_id
-
-    message = await safe_send(
-        bot,
-        chat_id=chat_id,
-        text=text,
-        reply_markup=inline_markup,
-    )
-    if not message:
-        return None
-
-    await session_storage.set_last_message_id(chat_id, message.message_id)
-
-    if last_message_id and last_message_id != message.message_id:
-        await safe_delete(bot, chat_id=chat_id, message_id=last_message_id)
-
-    return message.message_id
-
-
-def _calc_latency(started_at: float) -> float:
-    return round((time.perf_counter() - started_at) * 1000, 2)
-
-
-def _bind_screen(logger: BoundLogger, screen: str) -> BoundLogger:
-    return logger.bind(screen=screen)
-
-
-async def _ensure_session(chat_id: int) -> Any:
-    return await session_storage.get_session(chat_id)
-
-
-async def _load_stocks(token: str, *, force_refresh: bool) -> list[WBStockItem]:
-    return await get_stock_data(token, force_refresh=force_refresh)
-
-
-async def maybe_delete_user_message(
-    *, bot: Bot, message: Message, session: ChatSession, logger: BoundLogger | None = None
-) -> bool:
-    """Delete a user message if uploads are not expected.
-
-    Returns ``True`` when the message was deleted, ``False`` otherwise.
-    """
-
-    if session.expecting_upload:
-        if logger is not None:
-            logger.debug(
-                "user message preserved (expecting upload)",
-                expecting_upload=session.expecting_upload,
-            )
-        return False
-
-    await safe_delete(bot, chat_id=message.chat.id, message_id=message.message_id)
-    return True
-
-
-def _build_error_response(error: Exception) -> tuple[str, InlineKeyboardMarkup]:
-    if isinstance(error, WBAuthError):
-        return build_auth_error_text(), build_error_keyboard()
-    if isinstance(error, WBRatelimitError):
-        return build_rate_limit_text(error.retry_after), build_error_keyboard()
-    text = (
-        "<b>📦 Остатки на складах WB</b>\n\n"
-        "Не удалось получить остатки. Попробуйте обновить карточку позже."
-    )
-    return text, build_error_keyboard()
-
-
-async def _render_main_menu(bot: Bot, chat_id: int) -> int | None:
     session = await _ensure_session(chat_id)
-    session.history.clear()
-    nav_replace(session, ScreenState(name=SCREEN_MAIN, params={}))
-    await session_storage.update_session(
-        chat_id,
-        stocks_view=None,
-        stocks_wh_map={},
-        stocks_page=1,
-        local_page=1,
-        expecting_upload=False,
-    )
+    state = ScreenState(name=SCREEN_STORE_OPEN, params={})
+    if nav_action == "push":
+        nav_push(session, state)
+    else:
+        nav_replace(session, state)
+    await session_storage.update_session(chat_id, expecting_upload=False)
     return await _render_card(
         bot=bot,
         chat_id=chat_id,
-        text=build_greeting_text(),
-        inline_markup=build_main_keyboard(),
+        text=build_store_menu_text(note),
+        inline_markup=build_store_menu_keyboard(),
     )
 
 
@@ -889,106 +806,6 @@ async def _render_single_view(
     }
 
 
-def _local_status(session) -> dict[str, bool]:
-    return {
-        "wb": session.local_uploaded_wb is not None,
-        "local": session.local_uploaded_local is not None,
-        "ready": session.local_join_ready,
-    }
-
-
-async def _render_local_home(
-    bot: Bot,
-    chat_id: int,
-    *,
-    nav_action: str,
-) -> int | None:
-    session = await _ensure_session(chat_id)
-    status = _local_status(session)
-    has_export = status["ready"] or status["local"]
-    state = ScreenState(name=SCREEN_LOCAL_OPEN, params={})
-    if nav_action == "push":
-        nav_push(session, state)
-    else:
-        nav_replace(session, state)
-    await session_storage.update_session(chat_id, expecting_upload=False)
-    return await _render_card(
-        bot=bot,
-        chat_id=chat_id,
-        text=build_local_menu_text(),
-        inline_markup=build_local_menu_keyboard(has_export=has_export),
-    )
-
-
-async def _render_local_upload(
-    bot: Bot,
-    chat_id: int,
-    *,
-    nav_action: str,
-    stats: LocalJoinStats | None = None,
-    message: str | None = None,
-) -> int | None:
-    session = await _ensure_session(chat_id)
-    status = _local_status(session)
-    summary = stats
-    if summary is None and isinstance(session.local_stats, LocalJoinStats):
-        summary = session.local_stats
-    state = ScreenState(
-        name=SCREEN_LOCAL_UPLOAD,
-        params={"wb": status["wb"], "local": status["local"], "ready": status["ready"]},
-    )
-    if nav_action == "push":
-        nav_push(session, state)
-    else:
-        nav_replace(session, state)
-    await session_storage.update_session(chat_id, expecting_upload=True)
-    text = build_local_upload_text(
-        wb_uploaded=status["wb"],
-        local_uploaded=status["local"],
-        stats=summary if status["ready"] else None,
-        message=message,
-    )
-    keyboard = build_local_upload_keyboard(ready=status["ready"])
-    return await _render_card(
-        bot=bot,
-        chat_id=chat_id,
-        text=text,
-        inline_markup=keyboard,
-    )
-
-
-async def _render_local_preview(
-    bot: Bot,
-    chat_id: int,
-    dataframe,
-    *,
-    nav_action: str,
-    stats: LocalJoinStats | None = None,
-) -> int | None:
-    session = await _ensure_session(chat_id)
-    state = ScreenState(name=SCREEN_LOCAL_VIEW, params={})
-    if nav_action == "push":
-        nav_push(session, state)
-    else:
-        nav_replace(session, state)
-
-    summary = stats
-    if summary is None and isinstance(session.local_stats, LocalJoinStats):
-        summary = session.local_stats
-
-    summary_lines = _format_local_summary(summary).splitlines() if summary is not None else []
-    lines, total = build_local_preview(dataframe)
-    text = build_local_export_text(summary_lines, lines, total)
-    keyboard = build_local_menu_keyboard(has_export=True)
-    await session_storage.update_session(chat_id, expecting_upload=False)
-    return await _render_card(
-        bot=bot,
-        chat_id=chat_id,
-        text=text,
-        inline_markup=keyboard,
-    )
-
-
 async def _render_state(
     bot: Bot,
     chat_id: int,
@@ -1091,18 +908,8 @@ async def _render_state(
             ),
         )
         return message_id
-    if state.name == SCREEN_LOCAL_OPEN:
-        return await _render_local_home(bot, chat_id, nav_action="replace")
-    if state.name == SCREEN_LOCAL_UPLOAD:
-        return await _render_local_upload(bot, chat_id, nav_action="replace")
-    if state.name == SCREEN_LOCAL_VIEW:
-        result_df = load_latest(chat_id, "result")
-        if result_df is None:
-            return await _render_local_home(bot, chat_id, nav_action="replace")
-        stats = session.local_stats if isinstance(session.local_stats, LocalJoinStats) else None
-        return await _render_local_preview(
-            bot, chat_id, result_df, nav_action="replace", stats=stats
-        )
+    if state.name == SCREEN_STORE_OPEN:
+        return await _render_store_menu(bot, chat_id, nav_action="replace")
     return await _render_main_menu(bot, chat_id)
 
 
@@ -1204,11 +1011,10 @@ async def handle_text_message(
     with _action_logger("user_text", request_id) as logger:
         chat_id = message.chat.id
         session = await _ensure_session(chat_id)
-        expecting = session.expecting_upload
         logger.info(
             "Получен текст пользователя",
             text=message.text,
-            expecting_upload=expecting,
+            expecting_upload=session.expecting_upload,
         )
 
         deleted = await maybe_delete_user_message(
@@ -1218,21 +1024,13 @@ async def handle_text_message(
             logger=logger,
         )
 
-        if expecting and session.history and session.history[-1].name == SCREEN_LOCAL_UPLOAD:
-            await _render_local_upload(
-                bot,
-                chat_id,
-                nav_action="replace",
-                message=LOCAL_UPLOAD_HINT_TEXT,
-            )
-
         latency_ms = _calc_latency(started_at)
         structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
         logger.info(
             "Сообщение пользователя обработано",
             result="ok",
             deleted=deleted,
-            expecting_upload=expecting,
+            expecting_upload=session.expecting_upload,
         )
         structlog.contextvars.unbind_contextvars("latency_ms")
 
@@ -1444,12 +1242,9 @@ async def handle_stocks_back(
         await callback.answer()
         chat_id = callback.message.chat.id
         session = await _ensure_session(chat_id)
-        current = session.history[-1] if session.history else None
         previous = nav_back(session)
-        if current and current.name == SCREEN_LOCAL_VIEW:
-            message_id = await _render_local_upload(bot, chat_id, nav_action="push")
-            screen = SCREEN_LOCAL_UPLOAD
-        elif previous is None:
+
+        if previous is None:
             message_id = await _render_main_menu(bot, chat_id)
             screen = SCREEN_MAIN
         else:
@@ -1638,62 +1433,65 @@ async def handle_stocks_export(
         structlog.contextvars.unbind_contextvars("latency_ms")
 
 
-@MENU_ROUTER.callback_query(lambda c: c.data == MAIN_LOCAL_CALLBACK)
-async def handle_local_entry(
+@MENU_ROUTER.callback_query(lambda c: c.data == MAIN_STORE_CALLBACK)
+async def handle_store_open(
     callback: CallbackQuery, bot: Bot, request_id: str, started_at: float
 ) -> None:
-    with _action_logger("local_open", request_id) as logger:
-        logger = _bind_screen(logger, SCREEN_LOCAL_OPEN)
-        logger.info("Переход в раздел локальных остатков")
+    with _action_logger("store_open", request_id) as logger:
+        logger = _bind_screen(logger, SCREEN_STORE_OPEN)
+        logger.info("Переход в раздел остатков склада")
 
         if callback.message is None:
             await callback.answer()
             return
 
         await callback.answer()
-        message_id = await _render_local_home(bot, callback.message.chat.id, nav_action="push")
+        message_id = await _render_store_menu(bot, callback.message.chat.id, nav_action="push")
         success = message_id is not None
 
         latency_ms = _calc_latency(started_at)
         structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
         logger.info(
-            "Раздел локальных остатков открыт",
+            "Раздел остатков склада открыт",
             result="ok" if success else "fail",
             message_id=message_id,
         )
         structlog.contextvars.unbind_contextvars("latency_ms")
 
 
-@MENU_ROUTER.callback_query(lambda c: c.data == LOCAL_OPEN_CALLBACK)
-async def handle_local_open(
+@MENU_ROUTER.callback_query(lambda c: c.data == STORE_REFRESH_CALLBACK)
+async def handle_store_refresh(
     callback: CallbackQuery, bot: Bot, request_id: str, started_at: float
 ) -> None:
-    with _action_logger("local_home", request_id) as logger:
-        logger = _bind_screen(logger, SCREEN_LOCAL_OPEN)
-        logger.info("Возвращение на экран локальных остатков")
+    with _action_logger("store_refresh", request_id) as logger:
+        logger = _bind_screen(logger, SCREEN_STORE_OPEN)
+        logger.info("Обновление карточки остатков склада")
 
         if callback.message is None:
             await callback.answer()
             return
 
         await callback.answer()
-        message_id = await _render_local_home(bot, callback.message.chat.id, nav_action="replace")
+        message_id = await _render_store_menu(bot, callback.message.chat.id, nav_action="replace")
         success = message_id is not None
 
         latency_ms = _calc_latency(started_at)
         structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
         logger.info(
-            "Экран локальных остатков", result="ok" if success else "fail", message_id=message_id
+            "Карточка остатков склада обновлена",
+            result="ok" if success else "fail",
+            message_id=message_id,
         )
         structlog.contextvars.unbind_contextvars("latency_ms")
 
 
-@MENU_ROUTER.callback_query(lambda c: c.data == LOCAL_REFRESH_CALLBACK)
-async def handle_local_refresh(
+@MENU_ROUTER.callback_query(lambda c: c.data == STORE_BACK_CALLBACK)
+async def handle_store_back(
     callback: CallbackQuery, bot: Bot, request_id: str, started_at: float
 ) -> None:
-    with _action_logger("local_refresh", request_id) as logger:
-        logger.info("Запрошено обновление локальных остатков")
+    with _action_logger("store_back", request_id) as logger:
+        logger = _bind_screen(logger, SCREEN_STORE_OPEN)
+        logger.info("Возврат из раздела остатков склада")
 
         if callback.message is None:
             await callback.answer()
@@ -1702,89 +1500,9 @@ async def handle_local_refresh(
         await callback.answer()
         chat_id = callback.message.chat.id
         session = await _ensure_session(chat_id)
-        current_state = (
-            session.history[-1]
-            if session.history
-            else ScreenState(name=SCREEN_LOCAL_OPEN, params={})
-        )
-
-        if session.local_join_ready:
-            result = recompute_local_result(chat_id)
-            if result:
-                result_df, stats, result_path = result
-                session.local_stats = stats
-                session.local_join_ready = True
-                merge_logger = get_logger(__name__).bind(
-                    action="local_merge", request_id=request_id
-                )
-                merge_logger.info(
-                    "Итоговые остатки пересчитаны",
-                    wb_rows=stats.wb_rows,
-                    wb_unique=stats.wb_unique,
-                    local_rows=stats.local_rows,
-                    matched_rows=stats.matched_rows,
-                    result_path=str(result_path),
-                    expecting_upload=session.expecting_upload,
-                )
-                message_id = await _render_local_preview(
-                    bot, chat_id, result_df, nav_action="replace", stats=stats
-                )
-                screen = SCREEN_LOCAL_VIEW
-                metadata = {"result": "refreshed", "items": len(result_df)}
-            else:
-                session.local_join_ready = False
-                session.local_stats = None
-                message_id = await _render_local_upload(
-                    bot,
-                    chat_id,
-                    nav_action="replace",
-                    message="Нет данных для обновления",
-                )
-                screen = SCREEN_LOCAL_UPLOAD
-                metadata = {"result": "missing"}
-        elif current_state.name == SCREEN_LOCAL_UPLOAD:
-            message_id = await _render_local_upload(bot, chat_id, nav_action="replace")
-            screen = SCREEN_LOCAL_UPLOAD
-            metadata = {"result": "upload"}
-        else:
-            message_id = await _render_local_home(bot, chat_id, nav_action="replace")
-            screen = SCREEN_LOCAL_OPEN
-            metadata = {"result": "home"}
-
-        success = message_id is not None
-        latency_ms = _calc_latency(started_at)
-        structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
-        logger = _bind_screen(logger, screen)
-        logger.info(
-            "Локальные остатки обновлены",
-            result="ok" if success else "fail",
-            message_id=message_id,
-            **metadata,
-            expecting_upload=session.expecting_upload,
-        )
-        structlog.contextvars.unbind_contextvars("latency_ms")
-
-
-@MENU_ROUTER.callback_query(lambda c: c.data == LOCAL_BACK_CALLBACK)
-async def handle_local_back(
-    callback: CallbackQuery, bot: Bot, request_id: str, started_at: float
-) -> None:
-    with _action_logger("local_back", request_id) as logger:
-        logger.info("Возврат по истории локальных остатков")
-
-        if callback.message is None:
-            await callback.answer()
-            return
-
-        await callback.answer()
-        chat_id = callback.message.chat.id
-        session = await _ensure_session(chat_id)
-        current = session.history[-1] if session.history else None
         previous = nav_back(session)
-        if current and current.name == SCREEN_LOCAL_VIEW:
-            message_id = await _render_local_upload(bot, chat_id, nav_action="push")
-            screen = SCREEN_LOCAL_UPLOAD
-        elif previous is None:
+
+        if previous is None:
             message_id = await _render_main_menu(bot, chat_id)
             screen = SCREEN_MAIN
         else:
@@ -1795,22 +1513,25 @@ async def handle_local_back(
         latency_ms = _calc_latency(started_at)
         structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
         logger = _bind_screen(logger, screen)
-        logger.info(
-            "Возврат по локальным остаткам",
-            result="ok" if success else "fail",
-            message_id=message_id,
-            expecting_upload=session.expecting_upload,
-        )
+        logger.info("Возврат выполнен", result="ok" if success else "fail", message_id=message_id)
         structlog.contextvars.unbind_contextvars("latency_ms")
 
 
-@MENU_ROUTER.callback_query(lambda c: c.data == LOCAL_UPLOAD_CALLBACK)
-async def handle_local_upload_button(
+@MENU_ROUTER.callback_query(lambda c: c.data == STORE_WAIT_CALLBACK)
+async def handle_store_wait(callback: CallbackQuery) -> None:
+    if callback.message is None:
+        await callback.answer()
+        return
+    await callback.answer("Уже получаю остатки…")
+
+
+@MENU_ROUTER.callback_query(lambda c: c.data == STORE_GET_CALLBACK)
+async def handle_store_get(
     callback: CallbackQuery, bot: Bot, request_id: str, started_at: float
 ) -> None:
-    with _action_logger("local.upload", request_id) as logger:
-        logger = _bind_screen(logger, SCREEN_LOCAL_UPLOAD)
-        logger.info("Переход на экран загрузки локальных остатков")
+    with _action_logger("store_get", request_id) as logger:
+        logger = _bind_screen(logger, SCREEN_STORE_OPEN)
+        logger.info("Запрошено формирование остатков склада")
 
         if callback.message is None:
             await callback.answer()
@@ -1818,304 +1539,88 @@ async def handle_local_upload_button(
 
         await callback.answer()
         chat_id = callback.message.chat.id
-        message_id = await _render_local_upload(bot, chat_id, nav_action="push")
-        success = message_id is not None
-        session = await _ensure_session(chat_id)
+        message_id = callback.message.message_id
 
-        latency_ms = _calc_latency(started_at)
-        structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
-        logger.info(
-            "Экран загрузки локальных остатков",
-            result="ok" if success else "fail",
-            message_id=message_id,
-            expecting_upload=session.expecting_upload,
-        )
-        structlog.contextvars.unbind_contextvars("latency_ms")
-
-
-@MENU_ROUTER.callback_query(lambda c: c.data == LOCAL_EXPORT_CALLBACK)
-async def handle_local_export(
-    callback: CallbackQuery, bot: Bot, request_id: str, started_at: float
-) -> None:
-    with _action_logger("local_export", request_id) as logger:
-        logger.info("Запрошена выгрузка локальных остатков")
-
-        if callback.message is None:
-            await callback.answer()
-            return
-
-        chat_id = callback.message.chat.id
-        session = await _ensure_session(chat_id)
-
-        result_latest = Path(f"data/local/{chat_id}/result.xlsx")
-        stats = session.local_stats if isinstance(session.local_stats, LocalJoinStats) else None
-        if session.local_join_ready and result_latest.exists():
-            dataframe = load_latest(chat_id, "result")
-            if dataframe is None or dataframe.empty:
-                await callback.answer("Нет готового файла", show_alert=True)
-                metadata = {
-                    "result": "missing",
-                    "wb_rows": 0,
-                    "wb_unique": 0,
-                    "local_rows": 0,
-                    "matched_rows": 0,
-                    "result_path": str(result_latest),
-                }
-            else:
-                filename = f"wb_local_merged_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
-                await bot.send_document(
-                    chat_id=chat_id,
-                    document=BufferedInputFile(result_latest.read_bytes(), filename),
-                )
-                await _render_local_preview(
-                    bot, chat_id, dataframe, nav_action="replace", stats=stats
-                )
-                await callback.answer("Файл отправлен")
-                metadata = {
-                    "result": "sent",
-                    "items": len(dataframe),
-                    "wb_rows": stats.wb_rows if stats else 0,
-                    "wb_unique": stats.wb_unique if stats else 0,
-                    "local_rows": stats.local_rows if stats else 0,
-                    "matched_rows": stats.matched_rows if stats else 0,
-                    "result_path": str(result_latest),
-                }
-        else:
-            dataframe = build_local_only_dataframe(chat_id)
-            if dataframe is None or dataframe.empty:
-                await callback.answer("Загрузите файл склада", show_alert=True)
-                metadata = {
-                    "result": "empty",
-                    "wb_rows": 0,
-                    "wb_unique": 0,
-                    "local_rows": 0,
-                    "matched_rows": 0,
-                    "result_path": None,
-                }
-            else:
-                filename = "local_stock.xlsx"
-                await bot.send_document(
-                    chat_id=chat_id,
-                    document=BufferedInputFile(dataframe_to_xlsx_bytes(dataframe), filename),
-                )
-                preview_df = dataframe.rename(columns={"Количество": "Кол-во_наш_склад"})
-                lines, total = build_local_preview(preview_df)
-                reminder = ["Загрузите выгрузку Wildberries, чтобы построить итоговый файл."]
-                text = build_local_export_text(reminder, lines, total)
-                await _render_card(
-                    bot=bot,
-                    chat_id=chat_id,
-                    text=text,
-                    inline_markup=build_local_menu_keyboard(has_export=True),
-                )
-                await callback.answer("Файл отправлен")
-                metadata = {
-                    "result": "local_only",
-                    "items": total,
-                    "wb_rows": 0,
-                    "wb_unique": 0,
-                    "local_rows": len(dataframe),
-                    "matched_rows": 0,
-                    "result_path": None,
-                }
-
-        success = metadata.get("result") != "empty"
-        latency_ms = _calc_latency(started_at)
-        structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
-        logger = _bind_screen(logger, SCREEN_LOCAL_VIEW)
-        logger.info(
-            "Локальные остатки выгружены",
-            result="ok" if success else "fail",
-            message_id=None,
-            **metadata,
-        )
-        structlog.contextvars.unbind_contextvars("latency_ms")
-
-
-@MENU_ROUTER.message(F.document)
-async def handle_local_document(
-    message: Message, bot: Bot, request_id: str, started_at: float
-) -> None:
-    with _action_logger("local_document", request_id) as logger:
-        chat_id = message.chat.id
-        session = await _ensure_session(chat_id)
-        on_upload_screen = bool(session.history and session.history[-1].name == SCREEN_LOCAL_UPLOAD)
-        if not on_upload_screen:
-            await maybe_delete_user_message(
-                bot=bot,
-                message=message,
-                session=session,
-                logger=logger,
-            )
-            logger.warning(
-                "Документ получен вне экрана загрузки",
-                result="skip",
-                expecting_upload=session.expecting_upload,
-            )
-            return
-
-        await maybe_delete_user_message(
-            bot=bot,
-            message=message,
-            session=session,
-            logger=logger,
-        )
-
-        document = message.document
-        if document is None:
-            return
-
-        await _render_local_upload(
+        await safe_edit(
             bot,
-            chat_id,
-            nav_action="replace",
-            message=LOCAL_UPLOAD_PROGRESS_TEXT,
+            chat_id=chat_id,
+            message_id=message_id,
+            text=build_store_menu_text(),
+            inline_markup=build_store_menu_keyboard(loading=True),
         )
 
-        try:
-            file_data = await bot.download(document)
-        except Exception as error:  # pragma: no cover - best effort
-            logger.error(
-                "Не удалось скачать документ",
-                err=str(error),
-                result="fail",
-                expecting_upload=session.expecting_upload,
-            )
-            await _render_local_upload(
-                bot,
-                chat_id,
-                nav_action="replace",
-                message="Не удалось скачать файл. Попробуйте ещё раз.",
-            )
-            return
-
-        assert file_data is not None
-        content = file_data.read()
-        file_name = document.file_name or "uploaded.xlsx"
+        settings = get_settings()
+        success = False
+        note: str | None = None
 
         try:
-            dataframe = dataframe_from_bytes(content, file_name)
-        except LocalFileError as error:
-            logger.warning(
-                "Файл не распознан",
-                err=str(error),
-                result="fail",
-                expecting_upload=session.expecting_upload,
-            )
-            await _render_local_upload(
-                bot,
-                chat_id,
-                nav_action="replace",
-                message=str(error),
-            )
-            return
+            token_secret = settings.wb_api_token
+            if token_secret is None:
+                note = "⚠️ Добавьте WB_API_TOKEN, чтобы получить остатки Wildberries."
+                raise RuntimeError("WB token missing")
 
-        classification = classify_dataframe(dataframe)
-        class_logger = get_logger(__name__).bind(action="local_classify", request_id=request_id)
-        stats: LocalJoinStats | None = None
-        message_text: str | None = None
+            token = token_secret.get_secret_value()
+            items = await _load_stocks(token, force_refresh=False)
+            wb_df = build_export_dataframe(items)
 
-        if classification == "WB":
-            save_wb_upload(chat_id, dataframe)
-            session.local_uploaded_wb = Path(f"data/local/{chat_id}/wb.xlsx")
-            class_logger.info(
-                "Файл распознан как WB",
-                rows=len(dataframe),
-                columns=list(dataframe.columns),
-                expecting_upload=session.expecting_upload,
+            stock_map = await fetch_moysklad_stock_map(settings)
+            logger.info("merge.start", rows=len(wb_df))
+            merged = merge_moysklad_into_wb(
+                wb_df,
+                stock_map,
+                brand_store=settings.brand_store_name,
             )
-        elif classification == "LOCAL":
-            save_local_upload(chat_id, dataframe)
-            session.local_uploaded_local = Path(f"data/local/{chat_id}/local.xlsx")
-            class_logger.info(
-                "Файл распознан как локальный склад",
-                rows=len(dataframe),
-                columns=list(dataframe.columns),
-                expecting_upload=session.expecting_upload,
+            stats = merged.attrs.get("merge_stats", {})
+            logger.info("merge.stats", **stats)
+
+            exports_dir = Path("var/exports")
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+            sheet_name = (settings.brand_store_name or "WB").strip() or "WB"
+            for char in "[]:*?/\\":
+                sheet_name = sheet_name.replace(char, "_")
+            sheet_name = sheet_name[:31] or "WB"
+            file_path = save_dataframe_to_xlsx(
+                merged,
+                path=exports_dir / f"ostatki_store_{timestamp}.xlsx",
+                sheet_name=sheet_name,
             )
-        else:
-            session.local_join_ready = False
-            session.local_stats = None
-            message_text = "Не узнаю формат. Нужны столбцы Артикул и Количество для обоих файлов."
-            class_logger.warning(
-                "Файл не классифицирован",
-                rows=len(dataframe),
-                columns=list(dataframe.columns),
-                expecting_upload=session.expecting_upload,
-            )
-            await _render_local_upload(
-                bot,
-                chat_id,
-                nav_action="replace",
-                message=message_text,
-            )
+            logger.info("export.saved", path=str(file_path), rows_total=stats.get("rows_total"))
+
+            document = BufferedInputFile(file_path.read_bytes(), file_path.name)
+            await bot.send_document(chat_id=chat_id, document=document)
+            logger.info("export.sent", filename=file_path.name)
+
+            note = "Готово! Отправил файл с остатками в чат."
+            success = True
+        except WBApiError as error:
+            if isinstance(error, WBRatelimitError):
+                note = "⚠️ Лимит WB на обновление превышен. Попробуйте позже."
+            elif isinstance(error, WBAuthError):
+                note = "⚠️ Токен WB отклонён. Проверьте настройки."
+            else:
+                note = "⚠️ Не удалось получить остатки Wildberries. Попробуйте позже."
+            logger.exception("Ошибка при получении остатков WB", err=str(error))
+        except RuntimeError as error:
+            logger.exception("Ошибка при обращении к МойСклад", err=str(error))
+            if note is None:
+                note = f"⚠️ {error}"
+        except Exception as error:  # pragma: no cover - unexpected branch
+            logger.exception("Неожиданная ошибка при формировании остатков", err=str(error))
+            note = "⚠️ Не удалось сформировать файл. Попробуйте позже."
+        finally:
             latency_ms = _calc_latency(started_at)
             structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
-            logger = _bind_screen(logger, SCREEN_LOCAL_UPLOAD)
             logger.info(
-                "Документ отклонён",
-                result="fail",
-                expecting_upload=session.expecting_upload,
+                "Обработка остатков склада завершена",
+                result="ok" if success else "fail",
+                message_id=message_id,
             )
             structlog.contextvars.unbind_contextvars("latency_ms")
-            return
 
-        status = _local_status(session)
-        if status["wb"] and status["local"]:
-            wb_df = load_latest(chat_id, "wb")
-            local_df = load_latest(chat_id, "local")
-            if wb_df is not None and local_df is not None:
-                result_df, stats = merge_wb_with_local(wb_df, local_df)
-                result_path = save_result(chat_id, result_df)
-                session.local_join_ready = True
-                session.local_page = 1
-                session.local_stats = stats
-                merge_logger = get_logger(__name__).bind(
-                    action="local_merge", request_id=request_id
-                )
-                merge_logger.info(
-                    "Файлы объединены",
-                    wb_rows=stats.wb_rows,
-                    wb_unique=stats.wb_unique,
-                    local_rows=stats.local_rows,
-                    matched_rows=stats.matched_rows,
-                    result_path=str(result_path),
-                    expecting_upload=session.expecting_upload,
-                )
-                await _render_local_preview(
-                    bot, chat_id, result_df, nav_action="replace", stats=stats
-                )
-                latency_ms = _calc_latency(started_at)
-                structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
-                logger = _bind_screen(logger, SCREEN_LOCAL_VIEW)
-                logger.info(
-                    "Документ обработан",
-                    result="ok",
-                    expecting_upload=session.expecting_upload,
-                )
-                structlog.contextvars.unbind_contextvars("latency_ms")
-                return
-            message_text = "Не удалось прочитать загруженные данные. Попробуйте ещё раз."
-            session.local_join_ready = False
-            session.local_stats = None
-
-        else:
-            session.local_join_ready = False
-            session.local_stats = None
-
-        await _render_local_upload(
-            bot,
-            chat_id,
-            nav_action="replace",
-            message=message_text,
-        )
-
-        latency_ms = _calc_latency(started_at)
-        structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
-        logger = _bind_screen(logger, SCREEN_LOCAL_UPLOAD)
-        logger.info(
-            "Документ обработан",
-            result="ok",
-            expecting_upload=session.expecting_upload,
-        )
-        structlog.contextvars.unbind_contextvars("latency_ms")
+            await safe_edit(
+                bot,
+                chat_id=chat_id,
+                message_id=message_id,
+                text=build_store_menu_text(note),
+                inline_markup=build_store_menu_keyboard(),
+            )

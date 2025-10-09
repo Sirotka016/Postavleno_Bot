@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import AliasChoices, Field, SecretStr, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -23,10 +24,35 @@ class Settings(BaseSettings):
     log_json: bool = Field(True, validation_alias=AliasChoices("LOG_JSON"))
     log_rich: bool = Field(True, validation_alias=AliasChoices("LOG_RICH"))
     sentry_dsn: str | None = Field(None, validation_alias=AliasChoices("SENTRY_DSN"))
-    local_store_name: str = Field(
+    moysklad_auth_mode: Literal["basic", "token"] = Field(
+        "token",
+        validation_alias=AliasChoices("MOYSKLAD_AUTH_MODE"),
+        description="Режим аутентификации в API МойСклад",
+    )
+    moysklad_login: str | None = Field(
+        None,
+        validation_alias=AliasChoices("MOYSKLAD_LOGIN"),
+        description="Логин пользователя МойСклад для basic-аутентификации",
+    )
+    moysklad_password: str | None = Field(
+        None,
+        validation_alias=AliasChoices("MOYSKLAD_PASSWORD"),
+        description="Пароль пользователя МойСклад для basic-аутентификации",
+    )
+    moysklad_token: SecretStr | None = Field(
+        None,
+        validation_alias=AliasChoices("MOYSKLAD_TOKEN"),
+        description="API-токен МойСклад для bearer-аутентификации",
+    )
+    moysklad_page_size: int = Field(
+        1000,
+        validation_alias=AliasChoices("MOYSKLAD_PAGE_SIZE"),
+        description="Количество строк, загружаемых за один запрос к /report/stock/all",
+    )
+    brand_store_name: str = Field(
         "FootballShop",
-        validation_alias=AliasChoices("LOCAL_STORE_NAME"),
-        description="Название локального склада для итоговой выгрузки",
+        validation_alias=AliasChoices("BRAND_STORE_NAME"),
+        description='Значение колонки "Склад" для итоговой выгрузки',
     )
 
     model_config = SettingsConfigDict(

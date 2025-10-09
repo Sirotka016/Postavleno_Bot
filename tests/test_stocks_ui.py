@@ -34,10 +34,10 @@ def _make_item(warehouse: str, *, qty: int, nm: int = 1, article: str = "SKU") -
     )
 
 
-def test_main_keyboard_has_stocks_and_local_buttons() -> None:
+def test_main_keyboard_has_stocks_and_store_buttons() -> None:
     keyboard = menu.build_main_keyboard()
     rows = keyboard.inline_keyboard
-    assert [btn.text for btn in rows[0]] == ["📦 Остатки WB", "🏭 Остатки Склад"]
+    assert [btn.text for btn in rows[0]] == ["📦 Остатки WB", "🏬 Остатки Склад"]
     assert [btn.text for btn in rows[1]] == ["🔄 Обновить", "🚪 Выйти"]
 
 

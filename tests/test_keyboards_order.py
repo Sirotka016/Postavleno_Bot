@@ -18,11 +18,18 @@ def test_wb_all_buttons_order_with_pages() -> None:
     assert [button.text for button in rows[-1]] == ["🚪 Выйти"]
 
 
-def test_local_open_buttons_order() -> None:
-    keyboard = menu.build_local_menu_keyboard(has_export=True)
+def test_store_menu_buttons_order() -> None:
+    keyboard = menu.build_store_menu_keyboard()
     rows = keyboard.inline_keyboard
 
-    assert [button.text for button in rows[0]] == ["⬇️ Выгрузить"]
-    assert [button.text for button in rows[1]] == ["📤 Загрузить Остатки"]
-    assert [button.text for button in rows[2]] == ["🔄 Обновить", "⬅️ Назад"]
-    assert [button.text for button in rows[3]] == ["🚪 Выйти"]
+    assert [button.text for button in rows[0]] == ["📊 Узнать Остатки"]
+    assert [button.text for button in rows[1]] == ["🔄 Обновить", "⬅️ Назад"]
+    assert [button.text for button in rows[2]] == ["🚪 Выйти"]
+
+
+def test_store_menu_loading_replaces_action_button() -> None:
+    keyboard = menu.build_store_menu_keyboard(loading=True)
+    rows = keyboard.inline_keyboard
+
+    assert [button.text for button in rows[0]] == ["⌛ Получаю…"]
+    assert [button.callback_data for button in rows[0]] == [menu.STORE_WAIT_CALLBACK]

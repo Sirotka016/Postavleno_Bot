@@ -16,13 +16,13 @@ def test_history_back_goes_to_prev_page() -> None:
     assert len(session.history) == 1
 
 
-def test_history_back_from_upload_returns_to_local_open() -> None:
+def test_history_back_from_store_returns_to_previous_screen() -> None:
     session = ChatSession()
-    nav_push(session, ScreenState(name="LOCAL_OPEN", params={}))
-    nav_push(session, ScreenState(name="LOCAL_UPLOAD", params={}))
+    nav_push(session, ScreenState(name="MAIN", params={}))
+    nav_push(session, ScreenState(name="STORE_OPEN", params={}))
 
     previous = nav_back(session)
 
     assert previous is not None
-    assert previous.name == "LOCAL_OPEN"
+    assert previous.name == "MAIN"
     assert len(session.history) == 1
