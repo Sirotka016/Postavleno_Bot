@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 
@@ -20,12 +19,6 @@ class ChatSession:
     stocks_wh_map: dict[str, str] = field(default_factory=dict)
     stocks_view: str | None = None  # "ALL" | "wh:abcd1234" | "summary" | None
     stocks_page: int = 1  # current page (>=1)
-    # LOCAL
-    local_uploaded_wb: Path | None = None
-    local_uploaded_local: Path | None = None
-    local_join_ready: bool = False
-    local_page: int = 1
-    local_stats: object | None = None
     expecting_upload: bool = False  # when True, keep user messages (documents/text)
 
 
