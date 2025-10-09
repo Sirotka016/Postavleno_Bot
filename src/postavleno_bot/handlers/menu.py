@@ -49,7 +49,14 @@ from ..services.stocks import (
     get_stock_data,
     summarize_by_warehouse,
 )
-from ..state.session import ScreenState, nav_back, nav_push, nav_replace, session_storage
+from ..state.session import (
+    ChatSession,
+    ScreenState,
+    nav_back,
+    nav_push,
+    nav_replace,
+    session_storage,
+)
 from ..utils.safe_telegram import safe_delete, safe_edit, safe_send
 
 MENU_ROUTER = Router(name="menu")
@@ -84,6 +91,9 @@ SCREEN_WB_PAGE = "WB_PAGE"
 SCREEN_LOCAL_OPEN = "LOCAL_OPEN"
 SCREEN_LOCAL_UPLOAD = "LOCAL_UPLOAD"
 SCREEN_LOCAL_VIEW = "LOCAL_VIEW"
+
+LOCAL_UPLOAD_HINT_TEXT = "Сейчас я жду файлы Excel: WB и Склад. Пришлите их документом."
+LOCAL_UPLOAD_PROGRESS_TEXT = "Получаю файл…"
 
 
 @contextmanager
@@ -510,9 +520,7 @@ def build_local_upload_keyboard(*, ready: bool) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
 
 
-def build_local_export_text(
-    summary_lines: list[str], preview_lines: list[str], total: int
-) -> str:
+def build_local_export_text(summary_lines: list[str], preview_lines: list[str], total: int) -> str:
     shown = min(len(preview_lines), total)
     blocks: list[str] = ["<b>🏭 Остатки склада — итог</b>"]
 
@@ -586,6 +594,26 @@ async def _load_stocks(token: str, *, force_refresh: bool) -> list[WBStockItem]:
     return await get_stock_data(token, force_refresh=force_refresh)
 
 
+async def maybe_delete_user_message(
+    *, bot: Bot, message: Message, session: ChatSession, logger: BoundLogger | None = None
+) -> bool:
+    """Delete a user message if uploads are not expected.
+
+    Returns ``True`` when the message was deleted, ``False`` otherwise.
+    """
+
+    if session.expecting_upload:
+        if logger is not None:
+            logger.debug(
+                "user message preserved (expecting upload)",
+                expecting_upload=session.expecting_upload,
+            )
+        return False
+
+    await safe_delete(bot, chat_id=message.chat.id, message_id=message.message_id)
+    return True
+
+
 def _build_error_response(error: Exception) -> tuple[str, InlineKeyboardMarkup]:
     if isinstance(error, WBAuthError):
         return build_auth_error_text(), build_error_keyboard()
@@ -608,6 +636,7 @@ async def _render_main_menu(bot: Bot, chat_id: int) -> int | None:
         stocks_wh_map={},
         stocks_page=1,
         local_page=1,
+        expecting_upload=False,
     )
     return await _render_card(
         bot=bot,
@@ -629,7 +658,13 @@ async def _render_stocks_entry(
         nav_push(session, state)
     else:
         nav_replace(session, state)
-    await session_storage.update_session(chat_id, stocks_view=None, stocks_wh_map={}, stocks_page=1)
+    await session_storage.update_session(
+        chat_id,
+        stocks_view=None,
+        stocks_wh_map={},
+        stocks_page=1,
+        expecting_upload=False,
+    )
 
     settings = get_settings()
     token_secret = settings.wb_api_token
@@ -696,6 +731,7 @@ async def _render_warehouses_list(
         stocks_view="summary",
         stocks_wh_map=mapping,
         stocks_page=1,
+        expecting_upload=False,
     )
 
     message_id = await _render_card(
@@ -750,6 +786,7 @@ async def _render_all_view(
         stocks_view="ALL",
         stocks_page=page_number,
         stocks_wh_map=_build_warehouse_mapping(summaries),
+        expecting_upload=False,
     )
 
     message_id = await _render_card(
@@ -833,6 +870,7 @@ async def _render_single_view(
         stocks_view=warehouse_code,
         stocks_page=page_number,
         stocks_wh_map=_build_warehouse_mapping(summaries),
+        expecting_upload=False,
     )
 
     message_id = await _render_card(
@@ -873,6 +911,7 @@ async def _render_local_home(
         nav_push(session, state)
     else:
         nav_replace(session, state)
+    await session_storage.update_session(chat_id, expecting_upload=False)
     return await _render_card(
         bot=bot,
         chat_id=chat_id,
@@ -902,6 +941,7 @@ async def _render_local_upload(
         nav_push(session, state)
     else:
         nav_replace(session, state)
+    await session_storage.update_session(chat_id, expecting_upload=True)
     text = build_local_upload_text(
         wb_uploaded=status["wb"],
         local_uploaded=status["local"],
@@ -936,12 +976,11 @@ async def _render_local_preview(
     if summary is None and isinstance(session.local_stats, LocalJoinStats):
         summary = session.local_stats
 
-    summary_lines = (
-        _format_local_summary(summary).splitlines() if summary is not None else []
-    )
+    summary_lines = _format_local_summary(summary).splitlines() if summary is not None else []
     lines, total = build_local_preview(dataframe)
     text = build_local_export_text(summary_lines, lines, total)
     keyboard = build_local_menu_keyboard(has_export=True)
+    await session_storage.update_session(chat_id, expecting_upload=False)
     return await _render_card(
         bot=bot,
         chat_id=chat_id,
@@ -1139,7 +1178,13 @@ async def handle_start(message: Message, bot: Bot, request_id: str, started_at: 
         logger = _bind_screen(logger, SCREEN_MAIN)
         logger.info("Получена команда /start")
 
-        await safe_delete(bot, chat_id=message.chat.id, message_id=message.message_id)
+        session = await _ensure_session(message.chat.id)
+        await maybe_delete_user_message(
+            bot=bot,
+            message=message,
+            session=session,
+            logger=logger,
+        )
 
         message_id = await _render_main_menu(bot, message.chat.id)
         success = message_id is not None
@@ -1152,18 +1197,70 @@ async def handle_start(message: Message, bot: Bot, request_id: str, started_at: 
         structlog.contextvars.unbind_contextvars("latency_ms")
 
 
+@MENU_ROUTER.message(F.text)
+async def handle_text_message(
+    message: Message, bot: Bot, request_id: str, started_at: float
+) -> None:
+    with _action_logger("user_text", request_id) as logger:
+        chat_id = message.chat.id
+        session = await _ensure_session(chat_id)
+        expecting = session.expecting_upload
+        logger.info(
+            "Получен текст пользователя",
+            text=message.text,
+            expecting_upload=expecting,
+        )
+
+        deleted = await maybe_delete_user_message(
+            bot=bot,
+            message=message,
+            session=session,
+            logger=logger,
+        )
+
+        if expecting and session.history and session.history[-1].name == SCREEN_LOCAL_UPLOAD:
+            await _render_local_upload(
+                bot,
+                chat_id,
+                nav_action="replace",
+                message=LOCAL_UPLOAD_HINT_TEXT,
+            )
+
+        latency_ms = _calc_latency(started_at)
+        structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
+        logger.info(
+            "Сообщение пользователя обработано",
+            result="ok",
+            deleted=deleted,
+            expecting_upload=expecting,
+        )
+        structlog.contextvars.unbind_contextvars("latency_ms")
+
+
 @MENU_ROUTER.message()
 async def handle_user_message(
     message: Message, bot: Bot, request_id: str, started_at: float
 ) -> None:
     with _action_logger("user_message", request_id) as logger:
-        logger.info("Получено сообщение пользователя", text=message.text)
+        chat_id = message.chat.id
+        session = await _ensure_session(chat_id)
+        logger.info("Получено сообщение пользователя", expecting_upload=session.expecting_upload)
 
-        await safe_delete(bot, chat_id=message.chat.id, message_id=message.message_id)
+        deleted = await maybe_delete_user_message(
+            bot=bot,
+            message=message,
+            session=session,
+            logger=logger,
+        )
 
         latency_ms = _calc_latency(started_at)
         structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
-        logger.info("Сообщение пользователя удалено", result="ok")
+        logger.info(
+            "Сообщение пользователя обработано",
+            result="ok",
+            deleted=deleted,
+            expecting_upload=session.expecting_upload,
+        )
         structlog.contextvars.unbind_contextvars("latency_ms")
 
 
@@ -1627,6 +1724,7 @@ async def handle_local_refresh(
                     local_rows=stats.local_rows,
                     matched_rows=stats.matched_rows,
                     result_path=str(result_path),
+                    expecting_upload=session.expecting_upload,
                 )
                 message_id = await _render_local_preview(
                     bot, chat_id, result_df, nav_action="replace", stats=stats
@@ -1662,6 +1760,7 @@ async def handle_local_refresh(
             result="ok" if success else "fail",
             message_id=message_id,
             **metadata,
+            expecting_upload=session.expecting_upload,
         )
         structlog.contextvars.unbind_contextvars("latency_ms")
 
@@ -1700,6 +1799,7 @@ async def handle_local_back(
             "Возврат по локальным остаткам",
             result="ok" if success else "fail",
             message_id=message_id,
+            expecting_upload=session.expecting_upload,
         )
         structlog.contextvars.unbind_contextvars("latency_ms")
 
@@ -1708,7 +1808,7 @@ async def handle_local_back(
 async def handle_local_upload_button(
     callback: CallbackQuery, bot: Bot, request_id: str, started_at: float
 ) -> None:
-    with _action_logger("local_upload_screen", request_id) as logger:
+    with _action_logger("local.upload", request_id) as logger:
         logger = _bind_screen(logger, SCREEN_LOCAL_UPLOAD)
         logger.info("Переход на экран загрузки локальных остатков")
 
@@ -1717,8 +1817,10 @@ async def handle_local_upload_button(
             return
 
         await callback.answer()
-        message_id = await _render_local_upload(bot, callback.message.chat.id, nav_action="push")
+        chat_id = callback.message.chat.id
+        message_id = await _render_local_upload(bot, chat_id, nav_action="push")
         success = message_id is not None
+        session = await _ensure_session(chat_id)
 
         latency_ms = _calc_latency(started_at)
         structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
@@ -1726,6 +1828,7 @@ async def handle_local_upload_button(
             "Экран загрузки локальных остатков",
             result="ok" if success else "fail",
             message_id=message_id,
+            expecting_upload=session.expecting_upload,
         )
         structlog.contextvars.unbind_contextvars("latency_ms")
 
@@ -1793,17 +1896,11 @@ async def handle_local_export(
                 filename = "local_stock.xlsx"
                 await bot.send_document(
                     chat_id=chat_id,
-                    document=BufferedInputFile(
-                        dataframe_to_xlsx_bytes(dataframe), filename
-                    ),
+                    document=BufferedInputFile(dataframe_to_xlsx_bytes(dataframe), filename),
                 )
-                preview_df = dataframe.rename(
-                    columns={"Количество": "Кол-во_наш_склад"}
-                )
+                preview_df = dataframe.rename(columns={"Количество": "Кол-во_наш_склад"})
                 lines, total = build_local_preview(preview_df)
-                reminder = [
-                    "Загрузите выгрузку Wildberries, чтобы построить итоговый файл."
-                ]
+                reminder = ["Загрузите выгрузку Wildberries, чтобы построить итоговый файл."]
                 text = build_local_export_text(reminder, lines, total)
                 await _render_card(
                     bot=bot,
@@ -1842,22 +1939,48 @@ async def handle_local_document(
     with _action_logger("local_document", request_id) as logger:
         chat_id = message.chat.id
         session = await _ensure_session(chat_id)
-        if not session.history or session.history[-1].name != SCREEN_LOCAL_UPLOAD:
-            logger.warning("Документ получен вне экрана загрузки", result="skip")
-            await safe_delete(bot, chat_id=chat_id, message_id=message.message_id)
+        on_upload_screen = bool(session.history and session.history[-1].name == SCREEN_LOCAL_UPLOAD)
+        if not on_upload_screen:
+            await maybe_delete_user_message(
+                bot=bot,
+                message=message,
+                session=session,
+                logger=logger,
+            )
+            logger.warning(
+                "Документ получен вне экрана загрузки",
+                result="skip",
+                expecting_upload=session.expecting_upload,
+            )
             return
+
+        await maybe_delete_user_message(
+            bot=bot,
+            message=message,
+            session=session,
+            logger=logger,
+        )
 
         document = message.document
         if document is None:
-            await safe_delete(bot, chat_id=chat_id, message_id=message.message_id)
             return
 
-        await safe_delete(bot, chat_id=chat_id, message_id=message.message_id)
+        await _render_local_upload(
+            bot,
+            chat_id,
+            nav_action="replace",
+            message=LOCAL_UPLOAD_PROGRESS_TEXT,
+        )
 
         try:
             file_data = await bot.download(document)
         except Exception as error:  # pragma: no cover - best effort
-            logger.error("Не удалось скачать документ", err=str(error), result="fail")
+            logger.error(
+                "Не удалось скачать документ",
+                err=str(error),
+                result="fail",
+                expecting_upload=session.expecting_upload,
+            )
             await _render_local_upload(
                 bot,
                 chat_id,
@@ -1873,7 +1996,12 @@ async def handle_local_document(
         try:
             dataframe = dataframe_from_bytes(content, file_name)
         except LocalFileError as error:
-            logger.warning("Файл не распознан", err=str(error), result="fail")
+            logger.warning(
+                "Файл не распознан",
+                err=str(error),
+                result="fail",
+                expecting_upload=session.expecting_upload,
+            )
             await _render_local_upload(
                 bot,
                 chat_id,
@@ -1894,6 +2022,7 @@ async def handle_local_document(
                 "Файл распознан как WB",
                 rows=len(dataframe),
                 columns=list(dataframe.columns),
+                expecting_upload=session.expecting_upload,
             )
         elif classification == "LOCAL":
             save_local_upload(chat_id, dataframe)
@@ -1902,17 +2031,17 @@ async def handle_local_document(
                 "Файл распознан как локальный склад",
                 rows=len(dataframe),
                 columns=list(dataframe.columns),
+                expecting_upload=session.expecting_upload,
             )
         else:
             session.local_join_ready = False
             session.local_stats = None
-            message_text = (
-                "Не узнаю формат. Нужны столбцы Артикул и Количество для обоих файлов."
-            )
+            message_text = "Не узнаю формат. Нужны столбцы Артикул и Количество для обоих файлов."
             class_logger.warning(
                 "Файл не классифицирован",
                 rows=len(dataframe),
                 columns=list(dataframe.columns),
+                expecting_upload=session.expecting_upload,
             )
             await _render_local_upload(
                 bot,
@@ -1923,7 +2052,11 @@ async def handle_local_document(
             latency_ms = _calc_latency(started_at)
             structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
             logger = _bind_screen(logger, SCREEN_LOCAL_UPLOAD)
-            logger.info("Документ отклонён", result="fail")
+            logger.info(
+                "Документ отклонён",
+                result="fail",
+                expecting_upload=session.expecting_upload,
+            )
             structlog.contextvars.unbind_contextvars("latency_ms")
             return
 
@@ -1947,6 +2080,7 @@ async def handle_local_document(
                     local_rows=stats.local_rows,
                     matched_rows=stats.matched_rows,
                     result_path=str(result_path),
+                    expecting_upload=session.expecting_upload,
                 )
                 await _render_local_preview(
                     bot, chat_id, result_df, nav_action="replace", stats=stats
@@ -1954,7 +2088,11 @@ async def handle_local_document(
                 latency_ms = _calc_latency(started_at)
                 structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
                 logger = _bind_screen(logger, SCREEN_LOCAL_VIEW)
-                logger.info("Документ обработан", result="ok")
+                logger.info(
+                    "Документ обработан",
+                    result="ok",
+                    expecting_upload=session.expecting_upload,
+                )
                 structlog.contextvars.unbind_contextvars("latency_ms")
                 return
             message_text = "Не удалось прочитать загруженные данные. Попробуйте ещё раз."
@@ -1975,5 +2113,9 @@ async def handle_local_document(
         latency_ms = _calc_latency(started_at)
         structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
         logger = _bind_screen(logger, SCREEN_LOCAL_UPLOAD)
-        logger.info("Документ обработан", result="ok")
+        logger.info(
+            "Документ обработан",
+            result="ok",
+            expecting_upload=session.expecting_upload,
+        )
         structlog.contextvars.unbind_contextvars("latency_ms")
