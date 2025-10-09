@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import csv
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from io import StringIO
 
 import structlog
 
@@ -25,6 +28,37 @@ class WarehouseSummary:
     name: str
     total_qty: int
     sku_count: int
+
+
+@dataclass(slots=True)
+class Page:
+    number: int
+    lines: list[str]
+
+
+@dataclass(slots=True)
+class PagedView:
+    pages: list[Page]
+    total_items: int
+    total_pages: int
+
+
+LINES_PER_PAGE = 25
+TELEGRAM_TEXT_LIMIT = 4096
+
+EXPORT_HEADERS = [
+    "Склад",
+    "Артикул",
+    "nmId",
+    "Штрихкод",
+    "Кол-во",
+    "Категория",
+    "Предмет",
+    "Бренд",
+    "Размер",
+    "Цена",
+    "Скидка",
+]
 
 
 _cache: dict[str, _CacheEntry] = {}
@@ -75,3 +109,135 @@ def filter_by_warehouse(items: list[WBStockItem], warehouse_name: str | None) ->
     if warehouse_name is None:
         return items
     return [item for item in items if item.warehouseName == warehouse_name]
+
+
+def _format_item_line(item: WBStockItem) -> str:
+    return f"• {item.supplierArticle or '—'} (nm:{item.nmId}) — {item.quantity} шт."
+
+
+def _sorted_positive_groups(items: list[WBStockItem]) -> list[tuple[str, list[WBStockItem]]]:
+    groups: dict[str, list[WBStockItem]] = defaultdict(list)
+
+    for item in items:
+        if item.quantity <= 0:
+            continue
+        groups[item.warehouseName].append(item)
+
+    sorted_groups: list[tuple[str, list[WBStockItem]]] = []
+    for warehouse, group_items in groups.items():
+        group_items.sort(
+            key=lambda entry: (
+                -entry.quantity,
+                entry.supplierArticle or "",
+                entry.nmId,
+            )
+        )
+        sorted_groups.append((warehouse, group_items))
+
+    sorted_groups.sort(key=lambda pair: pair[0])
+    return sorted_groups
+
+
+def build_pages_grouped_by_warehouse(
+    items: list[WBStockItem], *, per_page: int = LINES_PER_PAGE
+) -> PagedView:
+    """Строит постраничное представление остатков по складам."""
+
+    if per_page < 2:
+        raise ValueError("per_page must allow header and at least one item")
+
+    groups = _sorted_positive_groups(items)
+    pages: list[Page] = []
+    page_number = 1
+
+    for warehouse, group_items in groups:
+        index = 0
+        while index < len(group_items):
+            chunk = group_items[index : index + (per_page - 1)]
+            lines = [f"🏬 {warehouse}"] + [_format_item_line(item) for item in chunk]
+            pages.append(Page(number=page_number, lines=lines))
+            page_number += 1
+            index += len(chunk)
+
+    total_items = sum(len(group) for _, group in groups)
+    total_pages = len(pages)
+    return PagedView(pages=pages, total_items=total_items, total_pages=total_pages)
+
+
+def format_single_warehouse(
+    items: list[WBStockItem], warehouse: str, *, per_page: int = LINES_PER_PAGE
+) -> tuple[str, PagedView | None]:
+    relevant = [item for item in items if item.warehouseName == warehouse and item.quantity > 0]
+
+    if not relevant:
+        return "Сейчас нет остатков на этом складе.", None
+
+    sorted_items = sorted(
+        relevant,
+        key=lambda entry: (-entry.quantity, entry.supplierArticle or "", entry.nmId),
+    )
+    lines = [_format_item_line(item) for item in sorted_items]
+    body = "\n".join(lines)
+    preview = f"🏬 {warehouse}\n{body}" if body else f"🏬 {warehouse}"
+
+    if len(preview) <= TELEGRAM_TEXT_LIMIT:
+        return body, None
+
+    paged_view = build_pages_grouped_by_warehouse(relevant, per_page=per_page)
+    return "", paged_view
+
+
+def _sort_for_export(items: list[WBStockItem]) -> list[WBStockItem]:
+    return sorted(
+        items,
+        key=lambda entry: (
+            entry.warehouseName,
+            -entry.quantity,
+            entry.supplierArticle or "",
+            entry.nmId,
+        ),
+    )
+
+
+def build_export_csv(items: list[WBStockItem]) -> bytes:
+    buffer = StringIO()
+    writer = csv.writer(buffer, delimiter=";", lineterminator="\n")
+    writer.writerow(EXPORT_HEADERS)
+
+    for item in _sort_for_export(items):
+        writer.writerow(
+            [
+                item.warehouseName,
+                item.supplierArticle,
+                item.nmId,
+                item.barcode,
+                item.quantity,
+                item.category or "",
+                item.subject or "",
+                item.brand or "",
+                item.techSize or "",
+                item.price or "",
+                item.discount or "",
+            ]
+        )
+
+    return buffer.getvalue().encode("utf-8")
+
+
+def sanitize_filename(value: str) -> str:
+    cleaned = re.sub(r"[^\w]+", "_", value, flags=re.UNICODE)
+    cleaned = cleaned.strip("_")
+    return cleaned or "warehouse"
+
+
+def build_export_filename(view: str, warehouse: str | None, moment: datetime) -> str:
+    timestamp = moment.strftime("%Y%m%d_%H%M")
+
+    if view == "ALL":
+        return f"wb_ostatki_ALL_{timestamp}.csv"
+
+    if warehouse:
+        sanitized = sanitize_filename(warehouse)
+        return f"wb_ostatki_{sanitized}_{timestamp}.csv"
+
+    return f"wb_ostatki_{timestamp}.csv"
