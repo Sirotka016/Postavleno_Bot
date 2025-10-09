@@ -1,34 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "postavleno-bot"
 version = "0.1.0"
-description = "Асинхронный Telegram-бот Postavleno"
+description = "Telegram bot for Wildberries stocks"
 readme = "README.md"
-requires-python = ">=3.11"
-license = { text = "MIT" }
-dependencies = [
-    "aiogram>=3.4,<4.0",
-    "structlog>=24.1,<25.0",
-    "pydantic>=2.6,<3.0",
-    "pydantic-settings>=2.6,<3.0",
-    "rich>=13.8,<14.0",
-    "orjson>=3.10,<4.0",
-    "httpx>=0.27,<0.28",
-]
+requires-python = ">=3.12"
+authors = [{name = "Postavleno Team"}]
+dependencies = []
 
-[build-system]
-requires = ["setuptools>=69.0", "wheel"]
-build-backend = "setuptools.build_meta"
-
-[tool.setuptools]
-package-dir = {"" = "src"}
-packages = ["postavleno_bot"]
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.black]
 line-length = 100
-target-version = ["py311"]
+target-version = ["py312"]
 
 [tool.ruff]
-target-version = "py314"
+target-version = "py312"
 line-length = 100
 src = ["src", "tests"]
 
@@ -40,7 +31,7 @@ ignore = ["E501"]
 quote-style = "preserve"
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 warn_unused_configs = true
 warn_return_any = true
 warn_unused_ignores = true
