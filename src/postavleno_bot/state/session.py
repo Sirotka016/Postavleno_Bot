@@ -8,7 +8,8 @@ from dataclasses import dataclass, field
 class ChatSession:
     last_bot_message_id: int | None = None
     stocks_wh_map: dict[str, str] = field(default_factory=dict)
-    stocks_view: str | None = None  # "all" | "wh:abcd1234" | "summary" | None
+    stocks_view: str | None = None  # "ALL" | "wh:abcd1234" | "summary" | None
+    stocks_page: int = 1  # current page (>=1)
 
 
 class SessionStorage:
