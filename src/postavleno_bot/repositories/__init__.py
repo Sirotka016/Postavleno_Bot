@@ -1,15 +1,15 @@
-"""Service-layer helpers."""
+"""Data repositories used by the bot."""
 
-from .accounts import (
+from .accounts_fs import (
     AccountAlreadyExistsError,
     AccountNotFoundError,
     AccountProfile,
-    get_accounts_repo,
+    AccountsFSRepository,
 )
 
 __all__ = [
     "AccountAlreadyExistsError",
     "AccountNotFoundError",
     "AccountProfile",
-    "get_accounts_repo",
+    "AccountsFSRepository",
 ]

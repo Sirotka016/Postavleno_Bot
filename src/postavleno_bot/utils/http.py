@@ -6,6 +6,13 @@ from typing import Any
 
 import httpx
 
+try:  # pragma: no cover - optional dependency
+    import h2  # noqa: F401
+
+    HTTP2_AVAILABLE = True
+except Exception:  # pragma: no cover - graceful fallback
+    HTTP2_AVAILABLE = False
+
 from ..core.config import get_settings
 from ..core.logging import get_logger
 
@@ -23,7 +30,7 @@ def create_wb_client(*, headers: dict[str, str] | None = None) -> httpx.AsyncCli
     client = httpx.AsyncClient(
         base_url=_WB_BASE_URL,
         headers=base_headers,
-        http2=False,
+        http2=HTTP2_AVAILABLE,
         timeout=settings.http_timeout_s,
     )
     client._postavleno_timeout = settings.http_timeout_s  # type: ignore[attr-defined]
@@ -43,7 +50,7 @@ def create_ms_client(*, headers: dict[str, str] | None = None) -> httpx.AsyncCli
     client = httpx.AsyncClient(
         base_url=_MS_BASE_URL,
         headers=base_headers,
-        http2=False,
+        http2=HTTP2_AVAILABLE,
         timeout=settings.http_timeout_s,
     )
     client._postavleno_timeout = settings.http_timeout_s  # type: ignore[attr-defined]
