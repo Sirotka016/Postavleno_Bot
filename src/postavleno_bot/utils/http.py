@@ -5,50 +5,28 @@ from collections.abc import Iterable
 from typing import Any
 
 import httpx
-import structlog
 
 from ..core.config import get_settings
 from ..core.logging import get_logger
 
-_log = structlog.get_logger("http")
 _WB_BASE_URL = "https://statistics-api.wildberries.ru"
 _MS_BASE_URL = "https://api.moysklad.ru/api/remap/1.2"
-
-
-def _http2_available() -> bool:
-    try:  # pragma: no cover - import check
-        import h2  # noqa: F401
-
-        return True
-    except Exception:
-        return False
-
-
-def _decide_http2() -> bool:
-    settings = get_settings()
-    requested = settings.http2_enabled
-    if requested and not _http2_available():
-        _log.warning("http2.requested_but_unavailable", outcome="fallback_to_http1")
-        return False
-    return requested
 
 
 def create_wb_client(*, headers: dict[str, str] | None = None) -> httpx.AsyncClient:
     """Return a configured AsyncClient for Wildberries API."""
 
     settings = get_settings()
-    use_http2 = _decide_http2()
     base_headers = {"Accept-Encoding": "gzip"}
     if headers:
         base_headers.update(headers)
     client = httpx.AsyncClient(
         base_url=_WB_BASE_URL,
         headers=base_headers,
-        http2=use_http2,
+        http2=False,
         timeout=settings.http_timeout_s,
     )
-    setattr(client, "_postavleno_http2", use_http2)
-    setattr(client, "_postavleno_timeout", settings.http_timeout_s)
+    client._postavleno_timeout = settings.http_timeout_s  # type: ignore[attr-defined]
     return client
 
 
@@ -56,7 +34,6 @@ def create_ms_client(*, headers: dict[str, str] | None = None) -> httpx.AsyncCli
     """Return a configured AsyncClient for MoySklad API."""
 
     settings = get_settings()
-    use_http2 = _decide_http2()
     base_headers = {
         "Accept-Encoding": "gzip",
         "User-Agent": "PostavlenoBot/1.0",
@@ -66,11 +43,10 @@ def create_ms_client(*, headers: dict[str, str] | None = None) -> httpx.AsyncCli
     client = httpx.AsyncClient(
         base_url=_MS_BASE_URL,
         headers=base_headers,
-        http2=use_http2,
+        http2=False,
         timeout=settings.http_timeout_s,
     )
-    setattr(client, "_postavleno_http2", use_http2)
-    setattr(client, "_postavleno_timeout", settings.http_timeout_s)
+    client._postavleno_timeout = settings.http_timeout_s  # type: ignore[attr-defined]
     return client
 
 
@@ -95,6 +71,7 @@ async def request_with_retry(
     target = url or path
     if target is None:
         raise ValueError("Target URL or path must be provided")
+    target_url = target
 
     logger = get_logger(logger_name)
     delay = base_delay
@@ -110,7 +87,7 @@ async def request_with_retry(
             outcome="attempt",
         )
         try:
-            response = await client.request(method, url or path, **request_kwargs)
+            response = await client.request(method, target_url, **request_kwargs)
         except httpx.HTTPError as exc:
             logger.warning(
                 "http.error",

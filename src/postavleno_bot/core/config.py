@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Literal
 
 from pydantic import AliasChoices, Field, SecretStr, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -15,67 +14,21 @@ class Settings(BaseSettings):
         description="Токен Telegram-бота",
         validation_alias=AliasChoices("TELEGRAM_BOT_TOKEN", "BOT_TOKEN", "TG_BOT_TOKEN"),
     )
-    wb_api_token: SecretStr | None = Field(
-        None,
-        description="Токен Wildberries API",
-        validation_alias=AliasChoices("WB_API_TOKEN", "WILDBERRIES_API_TOKEN"),
+    database_url: str = Field(
+        "sqlite+aiosqlite:///./data/app.db",
+        description="URL подключения к базе данных",
+        validation_alias=AliasChoices("DATABASE_URL"),
+    )
+    secret_key: SecretStr = Field(
+        ...,
+        description="Секретный ключ для шифрования токенов",
+        validation_alias=AliasChoices("SECRET_KEY", "FERNET_SECRET_KEY"),
     )
     log_level: str = Field("INFO", validation_alias=AliasChoices("LOG_LEVEL"))
     log_json: bool = Field(True, validation_alias=AliasChoices("LOG_JSON"))
     log_rich: bool = Field(True, validation_alias=AliasChoices("LOG_RICH"))
     sentry_dsn: str | None = Field(None, validation_alias=AliasChoices("SENTRY_DSN"))
-    http2_enabled: bool = Field(False, validation_alias=AliasChoices("HTTP2_ENABLED"))
     http_timeout_s: float = Field(30.0, validation_alias=AliasChoices("HTTP_TIMEOUT_S"))
-    moysklad_auth_mode: Literal["basic", "token"] = Field(
-        "token",
-        validation_alias=AliasChoices("MOYSKLAD_AUTH_MODE"),
-        description="Режим аутентификации в API МойСклад",
-    )
-    moysklad_login: str | None = Field(
-        None,
-        validation_alias=AliasChoices("MOYSKLAD_LOGIN"),
-        description="Логин пользователя МойСклад для basic-аутентификации",
-    )
-    moysklad_password: str | None = Field(
-        None,
-        validation_alias=AliasChoices("MOYSKLAD_PASSWORD"),
-        description="Пароль пользователя МойСклад для basic-аутентификации",
-    )
-    moysklad_token: SecretStr | None = Field(
-        None,
-        validation_alias=AliasChoices("MOYSKLAD_TOKEN"),
-        description="API-токен МойСклад для bearer-аутентификации",
-    )
-    moysklad_page_size: int = Field(
-        1000,
-        validation_alias=AliasChoices("MOYSKLAD_PAGE_SIZE"),
-        description="Количество строк, загружаемых за один запрос к /report/stock/all",
-    )
-    moysklad_quantity_field: Literal["quantity", "stock"] = Field(
-        "quantity",
-        validation_alias=AliasChoices("MOYSKLAD_QUANTITY_FIELD"),
-        description="Какое поле использовать из ответов МойСклад при подсчёте остатков",
-    )
-    moysklad_max_concurrency: int = Field(
-        6,
-        validation_alias=AliasChoices("MOYSKLAD_MAX_CONCURRENCY"),
-        description="Максимальное количество параллельных запросов к МойСклад",
-    )
-    moysklad_retry_attempts: int = Field(
-        4,
-        validation_alias=AliasChoices("MOYSKLAD_RETRY_ATTEMPTS"),
-        description="Количество попыток при ошибках и 429 от МойСклад",
-    )
-    moysklad_retry_base_delay: float = Field(
-        0.5,
-        validation_alias=AliasChoices("MOYSKLAD_RETRY_BASE_DELAY"),
-        description="Базовая задержка между повторами запросов к МойСклад",
-    )
-    local_store_name: str = Field(
-        "FootballShop",
-        validation_alias=AliasChoices("LOCAL_STORE_NAME", "BRAND_STORE_NAME"),
-        description='Значение колонки "Склад" для итоговой выгрузки',
-    )
 
     model_config = SettingsConfigDict(
         env_file=".env",

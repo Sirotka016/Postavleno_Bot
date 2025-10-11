@@ -1,42 +1,26 @@
 from __future__ import annotations
 
-import sys
-from types import SimpleNamespace
+from pathlib import Path
 
-if "httpx" not in sys.modules:
+import pytest
 
-    class _DummyAsyncClient:
-        def __init__(self, *args, **kwargs) -> None:  # pragma: no cover - helper
-            pass
+from postavleno_bot.core.config import get_settings
+from postavleno_bot.db.engine import create_all
 
-        async def __aenter__(self) -> _DummyAsyncClient:  # pragma: no cover
-            return self
+TEST_SECRET_KEY = "x1KjWbD5_yN1Hx0zP8z2dGkRWc5lN6P7i0p9w4s6c7o="
 
-        async def __aexit__(self, *exc_info: object) -> bool:  # pragma: no cover
-            return False
 
-        async def get(self, *args: object, **kwargs: object) -> object:  # pragma: no cover
-            raise RuntimeError("httpx.AsyncClient.get is not available in tests")
+@pytest.fixture(autouse=True)
+def configure_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("BOT_TOKEN", "1234567890:TESTTOKENforAUTHFLOW123456789012345")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{tmp_path / 'test.db'}")
+    monkeypatch.setenv("SECRET_KEY", TEST_SECRET_KEY)
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
-        async def request(self, *args: object, **kwargs: object) -> object:  # pragma: no cover
-            raise RuntimeError("httpx.AsyncClient.request is not available in tests")
 
-    class _DummyTimeout:
-        def __init__(self, *args: object, **kwargs: object) -> None:  # pragma: no cover
-            pass
-
-    class _DummyHTTPError(Exception):
-        pass
-
-    class _DummyHTTPStatusError(_DummyHTTPError):
-        def __init__(self, message: str, *, response: object | None = None) -> None:
-            super().__init__(message)
-            self.response = response
-
-    sys.modules["httpx"] = SimpleNamespace(
-        AsyncClient=_DummyAsyncClient,
-        HTTPError=_DummyHTTPError,
-        HTTPStatusError=_DummyHTTPStatusError,
-        Timeout=_DummyTimeout,
-        codes=SimpleNamespace(UNAUTHORIZED=401, TOO_MANY_REQUESTS=429),
-    )
+@pytest.fixture(autouse=True)
+async def initialize_database() -> None:
+    await create_all()
+    yield
