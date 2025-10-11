@@ -9,7 +9,10 @@ description = "Telegram bot for Wildberries stocks"
 readme = "README.md"
 requires-python = ">=3.12"
 authors = [{name = "Postavleno Team"}]
-dependencies = []
+dependencies = ["httpx>=0.27"]
+
+[project.optional-dependencies]
+http2 = ["httpx[http2]>=0.27"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

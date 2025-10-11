@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     log_json: bool = Field(True, validation_alias=AliasChoices("LOG_JSON"))
     log_rich: bool = Field(True, validation_alias=AliasChoices("LOG_RICH"))
     sentry_dsn: str | None = Field(None, validation_alias=AliasChoices("SENTRY_DSN"))
+    http2_enabled: bool = Field(False, validation_alias=AliasChoices("HTTP2_ENABLED"))
+    http_timeout_s: float = Field(30.0, validation_alias=AliasChoices("HTTP_TIMEOUT_S"))
     moysklad_auth_mode: Literal["basic", "token"] = Field(
         "token",
         validation_alias=AliasChoices("MOYSKLAD_AUTH_MODE"),

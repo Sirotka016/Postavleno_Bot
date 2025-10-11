@@ -120,7 +120,7 @@ async def _fetch_article(
 async def _fetch_strategy_batch(
     settings: Settings,
     normalized_articles: set[str],
-) -> dict[str, Decimal]:
+) -> tuple[dict[str, Decimal], dict[str, Any]]:
     headers = build_ms_headers(settings)
     concurrency = max(1, settings.moysklad_max_concurrency)
     semaphore = asyncio.Semaphore(concurrency)
@@ -129,7 +129,12 @@ async def _fetch_strategy_batch(
     batches = _chunked(articles, _BATCH_SIZE)
     logger = get_logger(__name__)
 
+    metadata: dict[str, Any] = {}
     async with create_ms_client(headers=headers) as client:
+        metadata = {
+            "http2": bool(getattr(client, "_postavleno_http2", False)),
+            "timeout_s": float(getattr(client, "_postavleno_timeout", settings.http_timeout_s)),
+        }
         for batch in batches:
             logger.info(
                 "ms.batch",
@@ -161,20 +166,25 @@ async def _fetch_strategy_batch(
             for response in batch_results:
                 for key, value in response.items():
                     results[key] = results.get(key, Decimal("0")) + value
-    return results
+    return results, metadata
 
 
 async def _fetch_strategy_scan(
     settings: Settings,
     normalized_articles: set[str],
-) -> dict[str, Decimal]:
+) -> tuple[dict[str, Decimal], dict[str, Any]]:
     headers = build_ms_headers(settings)
     quantity_field = settings.moysklad_quantity_field
     results: dict[str, Decimal] = {}
     limit = max(1, settings.moysklad_page_size)
     offset = 0
 
+    metadata: dict[str, Any] = {}
     async with create_ms_client(headers=headers) as client:
+        metadata = {
+            "http2": bool(getattr(client, "_postavleno_http2", False)),
+            "timeout_s": float(getattr(client, "_postavleno_timeout", settings.http_timeout_s)),
+        }
         while True:
             params = {"limit": limit, "offset": offset}
             response = await request_with_retry(
@@ -199,7 +209,7 @@ async def _fetch_strategy_scan(
             if len(rows) < limit:
                 break
             offset += limit
-    return results
+    return results, metadata
 
 
 async def fetch_quantities_for_articles(
@@ -223,12 +233,15 @@ async def fetch_quantities_for_articles(
             requested=0,
             found=0,
             missing=0,
+            http2=False,
+            timeout_s=settings.http_timeout_s,
         )
         return {}
 
     strategy = "batch"
+    http_metadata = {"http2": False, "timeout_s": settings.http_timeout_s}
     try:
-        results = await _fetch_strategy_batch(settings, normalized)
+        results, http_metadata = await _fetch_strategy_batch(settings, normalized)
     except Exception as error:
         logger.warning(
             "ms.fetch.fallback",
@@ -237,7 +250,7 @@ async def fetch_quantities_for_articles(
             strategy="batch",
         )
         strategy = "scan"
-        results = await _fetch_strategy_scan(settings, normalized)
+        results, http_metadata = await _fetch_strategy_scan(settings, normalized)
 
     found = len(results)
     missing = max(requested - found, 0)
@@ -248,5 +261,7 @@ async def fetch_quantities_for_articles(
         requested=requested,
         found=found,
         missing=missing,
+        http2=bool(http_metadata.get("http2", False)),
+        timeout_s=float(http_metadata.get("timeout_s", settings.http_timeout_s)),
     )
     return results

@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 import structlog
 
+from ..core.config import get_settings
 from ..integrations.wildberries import WBStockItem, fetch_stocks_all
 
 _CACHE_TTL = timedelta(minutes=3)
@@ -19,6 +20,8 @@ class _CacheEntry:
     items: list[WBStockItem]
     fetched_at: datetime
     expires_at: datetime
+    http2: bool
+    timeout_s: float
 
 
 @dataclass(slots=True)
@@ -67,6 +70,8 @@ async def get_stock_data(token: str, *, force_refresh: bool = False) -> list[WBS
             outcome="cache",
             cache_hit=True,
             rows=len(entry.items),
+            http2=entry.http2,
+            timeout_s=entry.timeout_s,
         )
         return entry.items
 
@@ -76,13 +81,31 @@ async def get_stock_data(token: str, *, force_refresh: bool = False) -> list[WBS
             outcome="throttled",
             cache_hit=True,
             rows=len(entry.items),
+            http2=entry.http2,
+            timeout_s=entry.timeout_s,
         )
         return entry.items
 
-    items = await fetch_stocks_all(token, date_from=date_from)
+    items, metadata = await fetch_stocks_all(token, date_from=date_from)
+    settings = get_settings()
+    http2 = bool(metadata.get("http2", False))
+    timeout_s = float(metadata.get("timeout_s") or settings.http_timeout_s)
     expires_at = now + _CACHE_TTL
-    _cache[key] = _CacheEntry(items=items, fetched_at=now, expires_at=expires_at)
-    _logger.info("wb.fetch", outcome="success", cache_hit=False, rows=len(items))
+    _cache[key] = _CacheEntry(
+        items=items,
+        fetched_at=now,
+        expires_at=expires_at,
+        http2=http2,
+        timeout_s=timeout_s,
+    )
+    _logger.info(
+        "wb.fetch",
+        outcome="success",
+        cache_hit=False,
+        rows=len(items),
+        http2=http2,
+        timeout_s=timeout_s,
+    )
     return items
 
 
