@@ -1,22 +1,22 @@
 from __future__ import annotations
 
 import asyncio
+
 import base64
 import re
 import unicodedata
 from contextlib import suppress
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from itertools import islice
+from typing import Any, Iterable
 
 import httpx
 
 from ..core.config import Settings
 from ..core.logging import get_logger
+from ..utils.http import create_ms_client, request_with_retry
 
-BASE_URL = "https://api.moysklad.ru/api/remap/1.2"
-_USER_AGENT = "PostavlenoBot/1.0"
-_MAX_RETRIES = 5
-_BACKOFF_BASE = 1.5
+_BATCH_SIZE = 50
 
 
 def build_ms_headers(settings: Settings) -> dict[str, str]:
@@ -50,59 +50,13 @@ def norm_article(raw: str) -> str:
     return value
 
 
-def _create_client(settings: Settings, headers: dict[str, str]) -> httpx.AsyncClient:
-    return httpx.AsyncClient(
-        timeout=60,
-        base_url=BASE_URL,
-        headers={
-            "Accept-Encoding": "gzip",
-            "User-Agent": _USER_AGENT,
-            **headers,
-        },
-    )
-
-
-async def _request_with_retry(
-    client: httpx.AsyncClient,
-    *,
-    path: str,
-    params: dict[str, Any],
-    logger_name: str,
-) -> httpx.Response:
-    logger = get_logger(logger_name)
-    delay = 1.0
-    for attempt in range(1, _MAX_RETRIES + 1):
-        try:
-            logger.debug("moysklad.request", path=path, attempt=attempt, delay=round(delay, 2))
-            response = await client.get(path, params=params)
-        except httpx.HTTPError as exc:
-            if attempt == _MAX_RETRIES:
-                raise RuntimeError(f"Ошибка сети при обращении к МойСклад: {exc}") from exc
-            await asyncio.sleep(delay)
-            delay = min(delay * _BACKOFF_BASE, 30.0)
-            continue
-
-        if response.status_code == 429 or response.status_code >= 500:
-            if attempt == _MAX_RETRIES:
-                snippet = response.text[:200]
-                raise RuntimeError(
-                    f"Ошибка МойСклад: {response.status_code} {snippet} (после {_MAX_RETRIES} попыток)"
-                )
-            retry_after = response.headers.get("Retry-After")
-            if retry_after:
-                with suppress(ValueError):
-                    delay = max(delay, float(retry_after))
-            await asyncio.sleep(delay)
-            delay = min(delay * _BACKOFF_BASE, 60.0)
-            continue
-
-        if response.status_code >= 400:
-            snippet = response.text[:200]
-            raise RuntimeError(f"Ошибка МойСклад: {response.status_code} {snippet}")
-
-        return response
-
-    raise RuntimeError("Не удалось получить ответ от МойСклад")
+def _chunked(items: list[str], size: int) -> Iterable[list[str]]:
+    iterator = iter(items)
+    while True:
+        chunk = list(islice(iterator, size))
+        if not chunk:
+            break
+        yield chunk
 
 
 def _accumulate_row(
@@ -135,14 +89,19 @@ async def _fetch_article(
     quantity_field: str,
     allowed_articles: set[str],
     semaphore: asyncio.Semaphore,
+    attempts: int,
+    base_delay: float,
 ) -> dict[str, Decimal]:
     params = {"filter": f"article={article}"}
     async with semaphore:
-        response = await _request_with_retry(
+        response = await request_with_retry(
             client,
+            method="GET",
             path="/entity/assortment",
             params=params,
             logger_name=__name__,
+            max_attempts=attempts,
+            base_delay=base_delay,
         )
     payload: dict[str, Any] = response.json()
     rows = payload.get("rows", []) or []
@@ -163,19 +122,45 @@ async def _fetch_strategy_batch(
     normalized_articles: set[str],
 ) -> dict[str, Decimal]:
     headers = build_ms_headers(settings)
-    semaphore = asyncio.Semaphore(1)
+    concurrency = max(1, settings.moysklad_max_concurrency)
+    semaphore = asyncio.Semaphore(concurrency)
     results: dict[str, Decimal] = {}
-    async with _create_client(settings, headers) as client:
-        for article in sorted(normalized_articles):
-            response = await _fetch_article(
-                client,
-                article=article,
-                quantity_field=settings.moysklad_quantity_field,
-                allowed_articles=normalized_articles,
-                semaphore=semaphore,
+    articles = sorted(normalized_articles)
+    batches = _chunked(articles, _BATCH_SIZE)
+    logger = get_logger(__name__)
+
+    async with create_ms_client(headers=headers) as client:
+        for batch in batches:
+            logger.info(
+                "ms.batch",
+                size=len(batch),
+                concurrency=concurrency,
+                outcome="start",
             )
-            for key, value in response.items():
-                results[key] = results.get(key, Decimal("0")) + value
+            tasks = [
+                asyncio.create_task(
+                    _fetch_article(
+                        client,
+                        article=article,
+                        quantity_field=settings.moysklad_quantity_field,
+                        allowed_articles=normalized_articles,
+                        semaphore=semaphore,
+                        attempts=settings.moysklad_retry_attempts,
+                        base_delay=settings.moysklad_retry_base_delay,
+                    )
+                )
+                for article in batch
+            ]
+            batch_results = await asyncio.gather(*tasks)
+            logger.info(
+                "ms.batch",
+                size=len(batch),
+                concurrency=concurrency,
+                outcome="success",
+            )
+            for response in batch_results:
+                for key, value in response.items():
+                    results[key] = results.get(key, Decimal("0")) + value
     return results
 
 
@@ -189,14 +174,17 @@ async def _fetch_strategy_scan(
     limit = max(1, settings.moysklad_page_size)
     offset = 0
 
-    async with _create_client(settings, headers) as client:
+    async with create_ms_client(headers=headers) as client:
         while True:
             params = {"limit": limit, "offset": offset}
-            response = await _request_with_retry(
+            response = await request_with_retry(
                 client,
+                method="GET",
                 path="/report/stock/all",
                 params=params,
                 logger_name=__name__,
+                max_attempts=settings.moysklad_retry_attempts,
+                base_delay=settings.moysklad_retry_base_delay,
             )
             payload: dict[str, Any] = response.json()
             rows = payload.get("rows", []) or []
@@ -224,23 +212,38 @@ async def fetch_quantities_for_articles(
     normalized = {norm_article(article) for article in wb_articles if article.strip()}
     normalized.discard("")
 
+    requested = len(normalized)
+    logger.info("ms.fetch.start", outcome="start", requested=requested)
+
     if not normalized:
-        logger.info("moysklad.fetch.skip", reason="empty_articles")
+        logger.info(
+            "ms.fetch.done",
+            outcome="success",
+            strategy="skip",
+            requested=0,
+            found=0,
+            missing=0,
+        )
         return {}
 
     strategy = "batch"
     try:
         results = await _fetch_strategy_batch(settings, normalized)
     except Exception as error:
-        logger.warning("moysklad.batch_failed", error=str(error))
+        logger.warning(
+            "ms.fetch.fallback",
+            outcome="fallback",
+            error=str(error),
+            strategy="batch",
+        )
         strategy = "scan"
         results = await _fetch_strategy_scan(settings, normalized)
 
-    requested = len(normalized)
     found = len(results)
     missing = max(requested - found, 0)
     logger.info(
-        "moysklad.fetch.done",
+        "ms.fetch.done",
+        outcome="success",
         strategy=strategy,
         requested=requested,
         found=found,

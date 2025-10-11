@@ -1,16 +1,13 @@
 from __future__ import annotations
 
 import hashlib
-import re
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-import pandas as pd
 import structlog
 
-from ..integrations.wb_client import WBStockItem, fetch_stocks_all
-from .export import dataframe_to_xlsx_bytes
+from ..integrations.wildberries import WBStockItem, fetch_stocks_all
 
 _CACHE_TTL = timedelta(minutes=3)
 _RATE_LIMIT_WINDOW = timedelta(minutes=1)
@@ -47,21 +44,6 @@ class PagedView:
 LINES_PER_PAGE = 25
 TELEGRAM_TEXT_LIMIT = 4096
 
-EXPORT_HEADERS = [
-    "Склад",
-    "Артикул",
-    "nmId",
-    "Штрихкод",
-    "Кол-во",
-    "Категория",
-    "Предмет",
-    "Бренд",
-    "Размер",
-    "Цена",
-    "Скидка",
-]
-
-
 _cache: dict[tuple[str, str, str], _CacheEntry] = {}
 _logger = structlog.get_logger(__name__)
 
@@ -80,22 +62,27 @@ async def get_stock_data(token: str, *, force_refresh: bool = False) -> list[WBS
     entry = _cache.get(key)
 
     if entry and entry.expires_at > now and not force_refresh:
-        _logger.debug("Stocks cache hit", outcome="hit", wb_cache_hit=True)
+        _logger.info(
+            "wb.fetch",
+            outcome="cache",
+            cache_hit=True,
+            rows=len(entry.items),
+        )
         return entry.items
 
     if entry and force_refresh and now - entry.fetched_at < _RATE_LIMIT_WINDOW:
-        _logger.warning("Stocks refresh throttled", outcome="throttled", wb_cache_hit=True)
+        _logger.warning(
+            "wb.fetch",
+            outcome="throttled",
+            cache_hit=True,
+            rows=len(entry.items),
+        )
         return entry.items
 
     items = await fetch_stocks_all(token, date_from=date_from)
     expires_at = now + _CACHE_TTL
     _cache[key] = _CacheEntry(items=items, fetched_at=now, expires_at=expires_at)
-    _logger.info(
-        "Stocks cache populated",
-        items_count=len(items),
-        outcome="ok",
-        wb_cache_hit=False,
-    )
+    _logger.info("wb.fetch", outcome="success", cache_hit=False, rows=len(items))
     return items
 
 
@@ -200,59 +187,3 @@ def format_single_warehouse(
     return "", paged_view
 
 
-def _sort_for_export(items: list[WBStockItem]) -> list[WBStockItem]:
-    return sorted(
-        items,
-        key=lambda entry: (
-            entry.warehouseName,
-            -entry.quantity,
-            entry.supplierArticle or "",
-            entry.nmId,
-        ),
-    )
-
-
-def build_export_dataframe(items: list[WBStockItem]) -> pd.DataFrame:
-    rows: list[dict[str, object]] = []
-    for item in _sort_for_export(items):
-        rows.append(
-            {
-                "Склад": item.warehouseName,
-                "Артикул": item.supplierArticle,
-                "nmId": item.nmId,
-                "Штрихкод": item.barcode,
-                "Кол-во": item.quantity,
-                "Категория": item.category or "",
-                "Предмет": item.subject or "",
-                "Бренд": item.brand or "",
-                "Размер": item.techSize or "",
-                "Цена": item.price or "",
-                "Скидка": item.discount or "",
-            }
-        )
-
-    return pd.DataFrame(rows, columns=EXPORT_HEADERS)
-
-
-def build_export_xlsx(items: list[WBStockItem]) -> bytes:
-    dataframe = build_export_dataframe(items)
-    return dataframe_to_xlsx_bytes(dataframe)
-
-
-def sanitize_filename(value: str) -> str:
-    cleaned = re.sub(r"[^\w]+", "_", value, flags=re.UNICODE)
-    cleaned = cleaned.strip("_")
-    return cleaned or "warehouse"
-
-
-def build_export_filename(view: str, warehouse: str | None, moment: datetime) -> str:
-    timestamp = moment.strftime("%Y%m%d_%H%M")
-
-    if view == "ALL":
-        return f"wb_ostatki_ALL_{timestamp}.xlsx"
-
-    if warehouse:
-        sanitized = sanitize_filename(warehouse)
-        return f"wb_ostatki_{sanitized}_{timestamp}.xlsx"
-
-    return f"wb_ostatki_{timestamp}.xlsx"

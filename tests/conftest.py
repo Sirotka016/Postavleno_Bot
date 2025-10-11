@@ -18,7 +18,25 @@ if "httpx" not in sys.modules:
         async def get(self, *args: object, **kwargs: object) -> object:  # pragma: no cover
             raise RuntimeError("httpx.AsyncClient.get is not available in tests")
 
+        async def request(self, *args: object, **kwargs: object) -> object:  # pragma: no cover
+            raise RuntimeError("httpx.AsyncClient.request is not available in tests")
+
+    class _DummyTimeout:
+        def __init__(self, *args: object, **kwargs: object) -> None:  # pragma: no cover
+            pass
+
+    class _DummyHTTPError(Exception):
+        pass
+
+    class _DummyHTTPStatusError(_DummyHTTPError):
+        def __init__(self, message: str, *, response: object | None = None) -> None:
+            super().__init__(message)
+            self.response = response
+
     sys.modules["httpx"] = SimpleNamespace(
         AsyncClient=_DummyAsyncClient,
+        HTTPError=_DummyHTTPError,
+        HTTPStatusError=_DummyHTTPStatusError,
+        Timeout=_DummyTimeout,
         codes=SimpleNamespace(UNAUTHORIZED=401, TOO_MANY_REQUESTS=429),
     )

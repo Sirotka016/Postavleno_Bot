@@ -7,6 +7,8 @@ from typing import Any
 import httpx
 import structlog
 
+from ..utils.http import create_wb_client, request_with_retry
+
 
 class WBApiError(RuntimeError):
     """Base exception for Wildberries API failures."""
@@ -44,9 +46,10 @@ class WBStockItem:
     scCode: str | None
 
 
-_BASE_URL = "https://statistics-api.wildberries.ru"
 _STOCKS_PATH = "/api/v1/supplier/stocks"
-_TIMEOUT = 30.0
+
+_RETRY_ATTEMPTS = 4
+_RETRY_BASE_DELAY = 0.5
 
 
 def _parse_datetime(value: str) -> datetime:
@@ -67,29 +70,46 @@ async def _request_page(
     page_idx: int,
 ) -> list[dict[str, Any]]:
     logger = structlog.get_logger(__name__).bind(endpoint=_STOCKS_PATH, page_idx=page_idx)
-    response = await client.get(_STOCKS_PATH, headers=headers, params=params)
-
-    status = response.status_code
-    logger = logger.bind(status=status)
-
-    if status == httpx.codes.UNAUTHORIZED:
-        logger.warning("WB API authentication failed", outcome="fail")
-        raise WBAuthError("WB API token rejected")
-    if status == httpx.codes.TOO_MANY_REQUESTS:
-        retry_raw = response.headers.get("X-Ratelimit-Retry")
-        retry_after = int(retry_raw) if retry_raw and retry_raw.isdigit() else None
-        logger.warning("WB API rate limited", retry_after=retry_after, outcome="fail")
-        raise WBRatelimitError("WB API rate limit exceeded", retry_after=retry_after)
-    if status >= 400:
-        logger.error("WB API error", outcome="fail")
-        raise WBApiError(f"WB API error: {status}")
+    try:
+        response = await request_with_retry(
+            client,
+            method="GET",
+            path=_STOCKS_PATH,
+            headers=headers,
+            params=params,
+            logger_name=__name__,
+            max_attempts=_RETRY_ATTEMPTS,
+            base_delay=_RETRY_BASE_DELAY,
+        )
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code if exc.response else None
+        if status == httpx.codes.UNAUTHORIZED:
+            logger.warning("WB API authentication failed", status=status, outcome="fail")
+            raise WBAuthError("WB API token rejected") from exc
+        if status == httpx.codes.TOO_MANY_REQUESTS:
+            retry_raw = exc.response.headers.get("Retry-After") if exc.response else None
+            if not retry_raw:
+                retry_raw = exc.response.headers.get("X-Ratelimit-Retry") if exc.response else None
+            retry_after = int(retry_raw) if retry_raw and retry_raw.isdigit() else None
+            logger.warning(
+                "WB API rate limited",
+                status=status,
+                retry_after=retry_after,
+                outcome="fail",
+            )
+            raise WBRatelimitError("WB API rate limit exceeded", retry_after=retry_after) from exc
+        logger.error("WB API error", status=status, outcome="fail")
+        raise WBApiError(f"WB API error: {status}") from exc
+    except httpx.HTTPError as exc:  # pragma: no cover - network issues
+        logger.error("WB API network error", error=str(exc), outcome="fail")
+        raise WBApiError("WB API network error") from exc
 
     payload = response.json()
     if not isinstance(payload, list):
         logger.error("Unexpected payload type", outcome="fail")
         raise WBApiError("Unexpected response structure from WB API")
 
-    logger.info("WB API page fetched", items_count=len(payload), outcome="ok")
+    logger.info("WB API page fetched", items_count=len(payload), outcome="success")
     return payload
 
 
@@ -121,7 +141,7 @@ async def fetch_stocks_all(token: str, *, date_from: datetime) -> list[WBStockIt
     params = {"dateFrom": date_from.isoformat()}
     items: list[WBStockItem] = []
 
-    async with httpx.AsyncClient(base_url=_BASE_URL, timeout=_TIMEOUT) as client:
+    async with create_wb_client() as client:
         page_idx = 0
         current_date_from = params["dateFrom"]
         while True:
