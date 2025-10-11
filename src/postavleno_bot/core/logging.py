@@ -13,16 +13,16 @@ from rich.logging import RichHandler
 from structlog.typing import Processor
 
 try:  # pragma: no cover - optional dependency branch
-    import orjson as _json_impl
+    import orjson as json_impl
 
-    def _dumps(obj: Any) -> str:
-        return _json_impl.dumps(obj, option=_json_impl.OPT_APPEND_NEWLINE).decode()
+    def json_dumps(obj: Any) -> bytes:
+        return json_impl.dumps(obj, option=json_impl.OPT_APPEND_NEWLINE)
 
 except Exception:  # pragma: no cover - fallback for environments without orjson
-    import json
+    import json as json_impl
 
-    def _dumps(obj: Any) -> str:
-        return json.dumps(obj, ensure_ascii=False) + "\n"
+    def json_dumps(obj: Any) -> bytes:
+        return json_impl.dumps(obj, ensure_ascii=False).encode() + b"\n"
 
 
 def _sanitize_fields(
@@ -94,7 +94,7 @@ def _console_renderer(
 def _json_renderer(
     _: structlog.types.WrappedLogger, __: str, event_dict: MutableMapping[str, Any]
 ) -> str:
-    return _dumps(event_dict)
+    return json_dumps(event_dict).decode()
 
 
 def _create_rich_handler() -> RichHandler:
@@ -200,3 +200,6 @@ def setup_logging(
 
 def get_logger(name: str | None = None) -> structlog.stdlib.BoundLogger:
     return cast(structlog.stdlib.BoundLogger, structlog.get_logger(name))
+
+
+__all__ = ["setup_logging", "get_logger", "json_dumps"]
