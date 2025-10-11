@@ -15,10 +15,7 @@ class ScreenState:
 class ChatSession:
     last_bot_message_id: int | None = None
     history: list[ScreenState] = field(default_factory=list)
-    # WB
-    stocks_wh_map: dict[str, str] = field(default_factory=dict)
-    stocks_view: str | None = None  # "ALL" | "wh:abcd1234" | "summary" | None
-    stocks_page: int = 1  # current page (>=1)
+    pending_input: str | None = None
 
 
 class SessionStorage:
