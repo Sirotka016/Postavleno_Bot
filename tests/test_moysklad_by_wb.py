@@ -104,6 +104,60 @@ def test_fetch_quantities_for_articles_batches(monkeypatch: pytest.MonkeyPatch) 
     assert requested_articles == ["A-1", "B-2", "C-3"]
 
 
+def test_ms_by_wb_simple(monkeypatch: pytest.MonkeyPatch) -> None:
+    responses = {
+        "A-1": [
+            DummyResponse(
+                {"rows": [{"article": "A-1", "quantity": 1}, {"article": "A-1", "quantity": 2}]}
+            )
+        ],
+        "B-2": [
+            DummyResponse(
+                {"rows": [{"article": "B-2", "quantity": 5}, {"article": "B-2", "quantity": 3}]}
+            )
+        ],
+        "C-3": [DummyResponse({"rows": []})],
+    }
+    client = DummyAsyncClient(responses)
+
+    def fake_client(**kwargs: Any) -> DummyAsyncClient:
+        return client
+
+    monkeypatch.setattr(moysklad.httpx, "AsyncClient", fake_client)
+
+    settings = Settings(
+        TELEGRAM_BOT_TOKEN="token",
+        MOYSKLAD_TOKEN="secret",
+        LOCAL_STORE_NAME="FootballShop",
+    )
+
+    wb_df = pd.DataFrame(
+        {
+            "Склад": ["WB-1", "WB-2", "WB-3", "WB-4"],
+            "Артикул": ["A-1", "B-2", "C-3", "A-1"],
+            "Кол-во": [10, 20, 30, 40],
+        }
+    )
+
+    ms_map = asyncio.run(fetch_quantities_for_articles(settings, set(wb_df["Артикул"])))
+
+    merged = merge_ms_into_wb(
+        wb_df,
+        ms_map,
+        store_name=settings.local_store_name or "FootballShop",
+        qty_col="Кол-во",
+        art_col="Артикул",
+        warehouse_col="Склад",
+    )
+
+    assert list(merged["Артикул"]) == list(wb_df["Артикул"])
+    assert list(merged["Кол-во"]) == [3, 8, 30, 3]
+    assert list(merged["Склад"]) == ["FootballShop"] * len(wb_df)
+
+    filters = [call["params"]["filter"] for call in client.calls]
+    assert filters == ["article=A-1", "article=B-2", "article=C-3"]
+
+
 def test_merge_ms_into_wb_keeps_shape() -> None:
     wb_df = pd.DataFrame(
         {

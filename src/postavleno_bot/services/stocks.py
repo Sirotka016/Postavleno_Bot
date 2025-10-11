@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from collections import defaultdict
 from dataclasses import dataclass
@@ -11,7 +12,7 @@ import structlog
 from ..integrations.wb_client import WBStockItem, fetch_stocks_all
 from .export import dataframe_to_xlsx_bytes
 
-_CACHE_TTL = timedelta(seconds=45)
+_CACHE_TTL = timedelta(minutes=3)
 _RATE_LIMIT_WINDOW = timedelta(minutes=1)
 _INITIAL_DATE_FROM = datetime(2019, 6, 20, tzinfo=UTC)
 
@@ -61,28 +62,40 @@ EXPORT_HEADERS = [
 ]
 
 
-_cache: dict[str, _CacheEntry] = {}
+_cache: dict[tuple[str, str, str], _CacheEntry] = {}
 _logger = structlog.get_logger(__name__)
+
+
+def _make_cache_key(token: str, date_from: datetime) -> tuple[str, str, str]:
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    return ("stocks", date_from.isoformat(), token_hash)
 
 
 async def get_stock_data(token: str, *, force_refresh: bool = False) -> list[WBStockItem]:
     """Кэширует результаты. При force_refresh игнорирует TTL, но уважает rate-limit."""
 
     now = datetime.now(UTC)
-    entry = _cache.get(token)
+    date_from = _INITIAL_DATE_FROM
+    key = _make_cache_key(token, date_from)
+    entry = _cache.get(key)
 
     if entry and entry.expires_at > now and not force_refresh:
-        _logger.debug("Stocks cache hit", result="hit")
+        _logger.debug("Stocks cache hit", outcome="hit", wb_cache_hit=True)
         return entry.items
 
     if entry and force_refresh and now - entry.fetched_at < _RATE_LIMIT_WINDOW:
-        _logger.warning("Stocks refresh throttled", result="throttled")
+        _logger.warning("Stocks refresh throttled", outcome="throttled", wb_cache_hit=True)
         return entry.items
 
-    items = await fetch_stocks_all(token, date_from=_INITIAL_DATE_FROM)
+    items = await fetch_stocks_all(token, date_from=date_from)
     expires_at = now + _CACHE_TTL
-    _cache[token] = _CacheEntry(items=items, fetched_at=now, expires_at=expires_at)
-    _logger.info("Stocks cache populated", items_count=len(items), result="ok")
+    _cache[key] = _CacheEntry(items=items, fetched_at=now, expires_at=expires_at)
+    _logger.info(
+        "Stocks cache populated",
+        items_count=len(items),
+        outcome="ok",
+        wb_cache_hit=False,
+    )
     return items
 
 

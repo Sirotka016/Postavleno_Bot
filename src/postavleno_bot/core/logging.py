@@ -13,6 +13,19 @@ from rich.console import Console
 from rich.logging import RichHandler
 from structlog.typing import Processor
 
+_RESERVED_KEYS = {"result"}
+
+
+def _sanitize_fields(
+    _: structlog.types.WrappedLogger,
+    __: str,
+    event_dict: MutableMapping[str, Any],
+) -> MutableMapping[str, Any]:
+    if "result" in event_dict:
+        event_dict["outcome"] = event_dict.pop("result")
+    return event_dict
+
+
 _LOG_LEVEL_EMOJI = {
     "debug": "🔍",
     "info": "🟢",
@@ -122,6 +135,7 @@ def setup_logging(
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
         _default_field_enricher,
+        _sanitize_fields,
         _event_to_message,
     ]
 

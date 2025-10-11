@@ -73,23 +73,23 @@ async def _request_page(
     logger = logger.bind(status=status)
 
     if status == httpx.codes.UNAUTHORIZED:
-        logger.warning("WB API authentication failed", result="fail")
+        logger.warning("WB API authentication failed", outcome="fail")
         raise WBAuthError("WB API token rejected")
     if status == httpx.codes.TOO_MANY_REQUESTS:
         retry_raw = response.headers.get("X-Ratelimit-Retry")
         retry_after = int(retry_raw) if retry_raw and retry_raw.isdigit() else None
-        logger.warning("WB API rate limited", retry_after=retry_after, result="fail")
+        logger.warning("WB API rate limited", retry_after=retry_after, outcome="fail")
         raise WBRatelimitError("WB API rate limit exceeded", retry_after=retry_after)
     if status >= 400:
-        logger.error("WB API error", result="fail")
+        logger.error("WB API error", outcome="fail")
         raise WBApiError(f"WB API error: {status}")
 
     payload = response.json()
     if not isinstance(payload, list):
-        logger.error("Unexpected payload type", result="fail")
+        logger.error("Unexpected payload type", outcome="fail")
         raise WBApiError("Unexpected response structure from WB API")
 
-    logger.info("WB API page fetched", items_count=len(payload), result="ok")
+    logger.info("WB API page fetched", items_count=len(payload), outcome="ok")
     return payload
 
 

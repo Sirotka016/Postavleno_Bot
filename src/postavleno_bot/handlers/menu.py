@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import binascii
 import time
 from collections.abc import Iterator
@@ -70,6 +71,7 @@ STORE_GET_CALLBACK = "store_stock:get"
 STORE_REFRESH_CALLBACK = "refresh_menu"
 STORE_BACK_CALLBACK = "store.back"
 STORE_WAIT_CALLBACK = "store_stock:wait"
+BACK_WAIT_CALLBACK = "nav.back_wait"
 
 SCREEN_MAIN = "MAIN"
 SCREEN_WB_OPEN = "WB_OPEN"
@@ -320,6 +322,27 @@ def _bind_screen(logger: BoundLogger, screen: str) -> BoundLogger:
 
 async def _ensure_session(chat_id: int) -> ChatSession:
     return await session_storage.get_session(chat_id)
+
+
+def build_back_wait_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="⌛ Назад…", callback_data=BACK_WAIT_CALLBACK)]]
+    )
+
+
+async def _show_back_wait(callback: CallbackQuery, bot: Bot) -> None:
+    message = callback.message
+    if not isinstance(message, Message):
+        return
+    text = (message.html_text or message.text or "")
+    await safe_edit(
+        bot,
+        chat_id=message.chat.id,
+        message_id=message.message_id,
+        text=text,
+        inline_markup=build_back_wait_keyboard(),
+    )
+    await asyncio.sleep(0.6)
 
 
 async def _load_stocks(token: str, *, force_refresh: bool) -> list[WBStockItem]:
@@ -611,7 +634,7 @@ async def _render_warehouses_list(
             text=build_missing_token_text(),
             inline_markup=build_missing_token_keyboard(),
         )
-        return message_id, {"result": "missing_token"}
+        return message_id, {"outcome": "missing_token"}
 
     token = token_secret.get_secret_value()
     try:
@@ -625,7 +648,7 @@ async def _render_warehouses_list(
             text=text,
             inline_markup=keyboard,
         )
-        return message_id, {"result": "error"}
+        return message_id, {"outcome": "error"}
 
     summaries = summarize_by_warehouse(items)
     keyboard, mapping = build_warehouses_keyboard(summaries)
@@ -650,7 +673,7 @@ async def _render_warehouses_list(
         inline_markup=keyboard,
     )
     return message_id, {
-        "result": "ok",
+        "outcome": "ok",
         "warehouses_count": len(summaries),
         "items_count": len(items),
         "page": 1,
@@ -916,7 +939,7 @@ async def _handle_stocks_display(
     token_secret = settings.wb_api_token
     if token_secret is None:
         message_id = await _render_stocks_entry(bot, chat_id, nav_action="replace")
-        return message_id, {"result": "missing_token"}
+        return message_id, {"outcome": "missing_token"}
 
     token = token_secret.get_secret_value()
     try:
@@ -931,7 +954,7 @@ async def _handle_stocks_display(
             text=text,
             inline_markup=keyboard,
         )
-        return message_id, {"result": "error"}
+        return message_id, {"outcome": "error"}
 
     summaries = summarize_by_warehouse(items)
     if view == "ALL":
@@ -989,7 +1012,7 @@ async def handle_start(message: Message, bot: Bot, request_id: str, started_at: 
         latency_ms = _calc_latency(started_at)
         structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
         logger.info(
-            "Главное меню показано", result="ok" if success else "fail", message_id=message_id
+            "Главное меню показано", outcome="ok" if success else "fail", message_id=message_id
         )
         structlog.contextvars.unbind_contextvars("latency_ms")
 
@@ -1012,7 +1035,7 @@ async def handle_text_message(
 
         latency_ms = _calc_latency(started_at)
         structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
-        logger.info("Сообщение пользователя обработано", result="ok", deleted=deleted)
+        logger.info("Сообщение пользователя обработано", outcome="ok", deleted=deleted)
         structlog.contextvars.unbind_contextvars("latency_ms")
 
 
@@ -1034,7 +1057,7 @@ async def handle_user_message(
 
         latency_ms = _calc_latency(started_at)
         structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
-        logger.info("Сообщение пользователя обработано", result="ok", deleted=deleted)
+        logger.info("Сообщение пользователя обработано", outcome="ok", deleted=deleted)
         structlog.contextvars.unbind_contextvars("latency_ms")
 
 
@@ -1056,7 +1079,7 @@ async def handle_refresh(
 
         latency_ms = _calc_latency(started_at)
         structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
-        logger.info("Меню обновлено", result="ok" if success else "fail", message_id=message_id)
+        logger.info("Меню обновлено", outcome="ok" if success else "fail", message_id=message_id)
         structlog.contextvars.unbind_contextvars("latency_ms")
 
 
@@ -1082,7 +1105,7 @@ async def handle_exit(
 
         latency_ms = _calc_latency(started_at)
         structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
-        logger.info("Меню закрыто", result="ok")
+        logger.info("Меню закрыто", outcome="ok")
         structlog.contextvars.unbind_contextvars("latency_ms")
 
 
@@ -1106,7 +1129,7 @@ async def handle_stocks_open(
         latency_ms = _calc_latency(started_at)
         structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
         logger.info(
-            "Раздел остатков открыт", result="ok" if success else "fail", message_id=message_id
+            "Раздел остатков открыт", outcome="ok" if success else "fail", message_id=message_id
         )
         structlog.contextvars.unbind_contextvars("latency_ms")
 
@@ -1138,7 +1161,7 @@ async def handle_stocks_view(
         structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
         logger.info(
             "Список складов показан",
-            result="ok" if success else "fail",
+            outcome="ok" if success else "fail",
             message_id=message_id,
             **metadata,
         )
@@ -1188,7 +1211,7 @@ async def handle_stocks_refresh(
             screen = metadata.get("view", SCREEN_WB_ALL)
         else:
             message_id = await _render_stocks_entry(bot, chat_id, nav_action="replace")
-            metadata = {"result": "menu"}
+            metadata = {"outcome": "menu"}
             screen = SCREEN_WB_OPEN
 
         success = message_id is not None
@@ -1197,7 +1220,7 @@ async def handle_stocks_refresh(
         logger = _bind_screen(logger, screen)
         logger.info(
             "Раздел остатков обновлён",
-            result="ok" if success else "fail",
+            outcome="ok" if success else "fail",
             message_id=message_id,
             **metadata,
         )
@@ -1216,6 +1239,7 @@ async def handle_stocks_back(
             return
 
         await callback.answer()
+        await _show_back_wait(callback, bot)
         chat_id = callback.message.chat.id
         session = await _ensure_session(chat_id)
         previous = nav_back(session)
@@ -1231,7 +1255,7 @@ async def handle_stocks_back(
         latency_ms = _calc_latency(started_at)
         structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
         logger = _bind_screen(logger, screen)
-        logger.info("Возврат выполнен", result="ok" if success else "fail", message_id=message_id)
+        logger.info("Возврат выполнен", outcome="ok" if success else "fail", message_id=message_id)
         structlog.contextvars.unbind_contextvars("latency_ms")
 
 
@@ -1273,7 +1297,7 @@ async def handle_stocks_filter(
         logger = _bind_screen(logger, screen)
         logger.info(
             "Фильтр складов обработан",
-            result="ok" if success else "fail",
+            outcome="ok" if success else "fail",
             message_id=message_id,
             **metadata,
         )
@@ -1303,7 +1327,7 @@ async def handle_stocks_page(
         current_view = session.stocks_view
 
         if current_view is None or current_view == "summary":
-            logger.warning("Страница недоступна без выбранного представления", result="skip")
+            logger.warning("Страница недоступна без выбранного представления", outcome="skip")
             return
 
         view_type = "ALL" if current_view == "ALL" else "wh"
@@ -1324,7 +1348,7 @@ async def handle_stocks_page(
         logger = _bind_screen(logger, SCREEN_WB_PAGE)
         logger.info(
             "Страница остатков переключена",
-            result="ok" if success else "fail",
+            outcome="ok" if success else "fail",
             message_id=message_id,
             **metadata,
         )
@@ -1347,14 +1371,14 @@ async def handle_stocks_export(
         current_view = session.stocks_view
 
         if current_view is None or current_view == "summary":
-            logger.warning("Экспорт без выбранного представления невозможен", result="skip")
+            logger.warning("Экспорт без выбранного представления невозможен", outcome="skip")
             await callback.answer("Выберите представление перед экспортом", show_alert=True)
             return
 
         settings = get_settings()
         token_secret = settings.wb_api_token
         if token_secret is None:
-            logger.warning("Нет токена для экспорта", result="fail")
+            logger.warning("Нет токена для экспорта", outcome="fail")
             await callback.answer("Добавьте токен, чтобы выгружать остатки", show_alert=True)
             return
 
@@ -1362,7 +1386,7 @@ async def handle_stocks_export(
         try:
             items = await _load_stocks(token, force_refresh=False)
         except WBApiError as error:
-            logger.error("Ошибка при выгрузке остатков", err=str(error), result="fail")
+            logger.error("Ошибка при выгрузке остатков", err=str(error), outcome="fail")
             await callback.answer("Не удалось выгрузить. Попробуйте позже", show_alert=True)
             return
 
@@ -1379,7 +1403,7 @@ async def handle_stocks_export(
             if warehouse_name is None:
                 warehouse_name = _build_warehouse_mapping(summaries).get(current_view)
             if warehouse_name is None:
-                logger.warning("Склад для экспорта не найден", result="fail")
+                logger.warning("Склад для экспорта не найден", outcome="fail")
                 await callback.answer("Склад недоступен, обновите карточку", show_alert=True)
                 return
             selected_items = [
@@ -1405,7 +1429,7 @@ async def handle_stocks_export(
         )
         latency_ms = _calc_latency(started_at)
         structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
-        logger.info("Файл остатков отправлен", result="ok")
+        logger.info("Файл остатков отправлен", outcome="ok")
         structlog.contextvars.unbind_contextvars("latency_ms")
 
 
@@ -1429,7 +1453,7 @@ async def handle_store_open(
         structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
         logger.info(
             "Раздел остатков склада открыт",
-            result="ok" if success else "fail",
+            outcome="ok" if success else "fail",
             message_id=message_id,
         )
         structlog.contextvars.unbind_contextvars("latency_ms")
@@ -1455,7 +1479,7 @@ async def handle_store_refresh(
         structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
         logger.info(
             "Карточка остатков склада обновлена",
-            result="ok" if success else "fail",
+            outcome="ok" if success else "fail",
             message_id=message_id,
         )
         structlog.contextvars.unbind_contextvars("latency_ms")
@@ -1474,6 +1498,7 @@ async def handle_store_back(
             return
 
         await callback.answer()
+        await _show_back_wait(callback, bot)
         chat_id = callback.message.chat.id
         session = await _ensure_session(chat_id)
         previous = nav_back(session)
@@ -1489,7 +1514,7 @@ async def handle_store_back(
         latency_ms = _calc_latency(started_at)
         structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
         logger = _bind_screen(logger, screen)
-        logger.info("Возврат выполнен", result="ok" if success else "fail", message_id=message_id)
+        logger.info("Возврат выполнен", outcome="ok" if success else "fail", message_id=message_id)
         structlog.contextvars.unbind_contextvars("latency_ms")
 
 
@@ -1499,6 +1524,11 @@ async def handle_store_wait(callback: CallbackQuery) -> None:
         await callback.answer()
         return
     await callback.answer("Уже получаю остатки…")
+
+
+@MENU_ROUTER.callback_query(lambda c: c.data == BACK_WAIT_CALLBACK)
+async def handle_back_wait(callback: CallbackQuery) -> None:
+    await callback.answer("Уже возвращаю…")
 
 
 @MENU_ROUTER.callback_query(lambda c: c.data == STORE_GET_CALLBACK)
@@ -1635,7 +1665,7 @@ async def handle_store_get(
             structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
             logger.info(
                 "Обработка остатков склада завершена",
-                result="ok" if success else "fail",
+                outcome="ok" if success else "fail",
                 message_id=message_id,
             )
             structlog.contextvars.unbind_contextvars("latency_ms")
