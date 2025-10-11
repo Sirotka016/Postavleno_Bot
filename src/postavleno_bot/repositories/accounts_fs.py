@@ -9,7 +9,9 @@ from pathlib import Path
 from typing import Any
 
 import bcrypt
+import shutil
 
+from ..core.logging import get_logger
 from ..domain.validators import validate_login
 
 
@@ -78,6 +80,7 @@ class AccountsFSRepository:
     def __init__(self, base_dir: Path) -> None:
         self._base_dir = base_dir
         self._rounds = 12
+        self._logger = get_logger(__name__).bind(repository="accounts_fs")
 
     def _account_dir(self, username: str) -> Path:
         return self._base_dir / username
@@ -157,6 +160,18 @@ class AccountsFSRepository:
         updated = profile.with_updates(company_name=company_name)
         self._write(updated)
         return updated
+
+    def delete(self, username: str) -> None:
+        path = self._account_dir(username)
+        if not path.exists():
+            self._logger.warning(
+                "Account directory missing during deletion",
+                username=username,
+                path=str(path),
+            )
+            return
+        shutil.rmtree(path, ignore_errors=False)
+        self._logger.info("Account directory removed", username=username, path=str(path))
 
 
 __all__ = [

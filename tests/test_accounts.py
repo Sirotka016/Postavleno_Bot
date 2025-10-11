@@ -2,8 +2,9 @@ from datetime import UTC, datetime
 
 import pytest
 
+from postavleno_bot.core.config import get_settings
 from postavleno_bot.repositories.accounts_fs import AccountAlreadyExistsError
-from postavleno_bot.services.accounts import get_accounts_repo
+from postavleno_bot.services.accounts import delete_account, get_accounts_repo
 
 
 def test_create_and_retrieve_account() -> None:
@@ -32,3 +33,17 @@ def test_update_tokens() -> None:
     assert updated.wb_api == "A" * 64
     updated = repo.set_ms_api(profile.username, "B" * 32)
     assert updated.ms_api == "B" * 32
+
+
+def test_delete_account_removes_directory() -> None:
+    repo = get_accounts_repo()
+    profile = repo.create(display_login="RemoveMe", password="password")
+    accounts_dir = get_settings().accounts_dir / profile.username
+    assert accounts_dir.exists()
+    delete_account(profile.username)
+    assert not accounts_dir.exists()
+
+
+def test_delete_missing_account_is_safe() -> None:
+    repo = get_accounts_repo()
+    repo.delete("ghost")
