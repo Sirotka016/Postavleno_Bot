@@ -14,17 +14,16 @@ from ..navigation import (
     SCREEN_REGISTER,
     nav_back,
 )
-from ..services.accounts import AccountNotFoundError, get_accounts_repo
 from ..state import LoginStates, RegisterStates
 from .pages import (
-    render_auth_menu,
     render_home,
     render_login,
     render_profile,
     render_register,
+    render_require_auth,
     render_unknown,
 )
-from .utils import delete_user_message, get_auth_user
+from .utils import delete_user_message, load_active_profile
 
 router = Router()
 
@@ -42,29 +41,63 @@ async def repeat_previous(callback: CallbackQuery, state: FSMContext) -> None:
         return
     await callback.answer()
     previous = await nav_back(state)
+    profile = await load_active_profile(state)
     if not previous:
-        await render_home(callback.bot, state, callback.message.chat.id, nav_action="root")
+        await render_home(
+            callback.bot,
+            state,
+            callback.message.chat.id,
+            nav_action="root",
+            is_authed=profile is not None,
+            profile=profile,
+        )
         return
 
-    repo = get_accounts_repo()
-    auth_user = await get_auth_user(state)
-
     if previous.name == SCREEN_HOME:
-        await render_home(callback.bot, state, callback.message.chat.id, nav_action="root")
+        await render_home(
+            callback.bot,
+            state,
+            callback.message.chat.id,
+            nav_action="root",
+            is_authed=profile is not None,
+            profile=profile,
+        )
     elif previous.name == SCREEN_AUTH_MENU:
-        await render_auth_menu(callback.bot, state, callback.message.chat.id, nav_action="replace")
+        await render_require_auth(callback.bot, state, callback.message.chat.id, nav_action="replace")
     elif previous.name == SCREEN_LOGIN:
         await state.set_state(LoginStates.await_login)
         await render_login(callback.bot, state, callback.message.chat.id, nav_action="replace")
     elif previous.name == SCREEN_REGISTER:
         await state.set_state(RegisterStates.await_login)
         await render_register(callback.bot, state, callback.message.chat.id, nav_action="replace")
-    elif previous.name == SCREEN_PROFILE and auth_user:
-        try:
-            profile = repo.get(auth_user)
-        except AccountNotFoundError:
-            await render_home(callback.bot, state, callback.message.chat.id, nav_action="root")
+    elif previous.name == SCREEN_PROFILE:
+        if not profile:
+            await render_require_auth(callback.bot, state, callback.message.chat.id, nav_action="replace")
         else:
             await render_profile(callback.bot, state, callback.message.chat.id, profile, nav_action="replace")
     else:
-        await render_home(callback.bot, state, callback.message.chat.id, nav_action="root")
+        await render_home(
+            callback.bot,
+            state,
+            callback.message.chat.id,
+            nav_action="root",
+            is_authed=profile is not None,
+            profile=profile,
+        )
+
+
+@router.callback_query(F.data == "unknown.exit")
+async def exit_unknown(callback: CallbackQuery, state: FSMContext) -> None:
+    if callback.message is None:
+        return
+    await callback.answer()
+    await state.set_state(None)
+    profile = await load_active_profile(state)
+    await render_home(
+        callback.bot,
+        state,
+        callback.message.chat.id,
+        nav_action="root",
+        is_authed=profile is not None,
+        profile=profile,
+    )

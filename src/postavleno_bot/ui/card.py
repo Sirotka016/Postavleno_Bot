@@ -59,6 +59,21 @@ class CardManager:
                 await bot.delete_message(chat_id, previous_id)
         return new_id
 
+    async def close(
+        self,
+        bot: Bot,
+        chat_id: int,
+        *,
+        state: FSMContext | None = None,
+    ) -> None:
+        message_id = self._message_ids.pop(chat_id, None)
+        if state is not None:
+            await state.update_data(card_message_id=None)
+        if message_id is None:
+            return
+        with suppress(TelegramBadRequest):
+            await bot.delete_message(chat_id, message_id)
+
 
 card_manager = CardManager()
 

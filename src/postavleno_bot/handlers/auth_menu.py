@@ -7,18 +7,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
 
 from ..state import LoginStates, RegisterStates
-from .pages import render_auth_menu, render_login, render_register
+from .pages import render_login, render_register
 
 router = Router()
-
-
-@router.callback_query(F.data == "auth.refresh")
-async def refresh_auth_menu(callback: CallbackQuery, state: FSMContext) -> None:
-    if callback.message is None:
-        return
-    await callback.answer()
-    await state.set_state(None)
-    await render_auth_menu(callback.bot, state, callback.message.chat.id, nav_action="replace")
 
 
 @router.callback_query(F.data == "auth.login")

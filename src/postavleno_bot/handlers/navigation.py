@@ -17,10 +17,8 @@ from ..navigation import (
     SCREEN_REGISTER,
     nav_back,
 )
-from ..services.accounts import AccountNotFoundError, get_accounts_repo
 from ..state import EditMSState, EditWBState, LoginStates, RegisterStates
 from .pages import (
-    render_auth_menu,
     render_edit_email,
     render_edit_ms,
     render_edit_wb,
@@ -28,8 +26,9 @@ from .pages import (
     render_login,
     render_profile,
     render_register,
+    render_require_auth,
 )
-from .utils import get_auth_user, set_auth_user
+from .utils import load_active_profile
 
 router = Router()
 
@@ -44,16 +43,30 @@ async def go_back(callback: CallbackQuery, state: FSMContext) -> None:
     bot = callback.bot
     chat_id = callback.message.chat.id
     if not previous:
-        await render_home(bot, state, chat_id, nav_action="root")
+        profile = await load_active_profile(state)
+        await render_home(
+            bot,
+            state,
+            chat_id,
+            nav_action="root",
+            is_authed=profile is not None,
+            profile=profile,
+        )
         return
 
-    repo = get_accounts_repo()
-    auth_user = await get_auth_user(state)
+    profile = await load_active_profile(state)
 
     if previous.name == SCREEN_HOME:
-        await render_home(bot, state, chat_id, nav_action="root")
+        await render_home(
+            bot,
+            state,
+            chat_id,
+            nav_action="root",
+            is_authed=profile is not None,
+            profile=profile,
+        )
     elif previous.name == SCREEN_AUTH_MENU:
-        await render_auth_menu(bot, state, chat_id, nav_action="replace")
+        await render_require_auth(bot, state, chat_id, nav_action="replace")
     elif previous.name == SCREEN_LOGIN:
         await state.set_state(LoginStates.await_login)
         await render_login(
@@ -72,12 +85,9 @@ async def go_back(callback: CallbackQuery, state: FSMContext) -> None:
             nav_action="replace",
             await_password=bool(previous.params.get("await_password")),
         )
-    elif previous.name == SCREEN_PROFILE and auth_user:
-        try:
-            profile = repo.get(auth_user)
-        except AccountNotFoundError:
-            await set_auth_user(state, None)
-            await render_home(bot, state, chat_id, nav_action="root")
+    elif previous.name == SCREEN_PROFILE:
+        if not profile:
+            await render_require_auth(bot, state, chat_id, nav_action="replace")
         else:
             await render_profile(bot, state, chat_id, profile, nav_action="replace")
     elif previous.name == SCREEN_EDIT_WB:
@@ -89,4 +99,11 @@ async def go_back(callback: CallbackQuery, state: FSMContext) -> None:
     elif previous.name == SCREEN_EDIT_EMAIL:
         await render_edit_email(bot, state, chat_id, nav_action="replace")
     else:
-        await render_home(bot, state, chat_id, nav_action="root")
+        await render_home(
+            bot,
+            state,
+            chat_id,
+            nav_action="root",
+            is_authed=profile is not None,
+            profile=profile,
+        )
