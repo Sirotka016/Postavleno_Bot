@@ -3,6 +3,25 @@ from __future__ import annotations
 from postavleno_bot.state.session import ChatSession, ScreenState, nav_back, nav_push
 
 
+def test_nav_back_stack() -> None:
+    session = ChatSession()
+    main = ScreenState(name="MAIN", params={})
+    nav_push(session, main)
+    nav_push(session, ScreenState(name="WB_LIST", params={"view": "summary"}))
+    nav_push(session, ScreenState(name="WB_LIST", params={"view": "summary"}))
+
+    assert len(session.history) == 2
+
+    previous = nav_back(session)
+    assert previous is not None
+    assert previous.name == "MAIN"
+    assert len(session.history) == 1
+
+    root = nav_back(session)
+    assert root is None
+    assert len(session.history) == 1
+
+
 def test_history_back_goes_to_prev_page() -> None:
     session = ChatSession()
     nav_push(session, ScreenState(name="WB_PAGE", params={"page": 2}))

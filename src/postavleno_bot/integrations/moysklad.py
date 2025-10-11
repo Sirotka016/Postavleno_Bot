@@ -4,7 +4,6 @@ import asyncio
 import base64
 import re
 import unicodedata
-from collections.abc import Iterable
 from contextlib import suppress
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -16,8 +15,6 @@ from ..core.logging import get_logger
 
 BASE_URL = "https://api.moysklad.ru/api/remap/1.2"
 _USER_AGENT = "PostavlenoBot/1.0"
-_MAX_CONCURRENT_REQUESTS = 6
-_BATCH_SIZE = 50
 _MAX_RETRIES = 5
 _BACKOFF_BASE = 1.5
 
@@ -161,46 +158,24 @@ async def _fetch_article(
     return result
 
 
-def _chunked(iterable: Iterable[str], size: int) -> Iterable[list[str]]:
-    iterator = iter(iterable)
-    while True:
-        chunk: list[str] = []
-        for _ in range(size):
-            try:
-                chunk.append(next(iterator))
-            except StopIteration:
-                break
-        if not chunk:
-            break
-        yield chunk
-
-
 async def _fetch_strategy_batch(
     settings: Settings,
     normalized_articles: set[str],
 ) -> dict[str, Decimal]:
     headers = build_ms_headers(settings)
-    semaphore = asyncio.Semaphore(_MAX_CONCURRENT_REQUESTS)
+    semaphore = asyncio.Semaphore(1)
     results: dict[str, Decimal] = {}
     async with _create_client(settings, headers) as client:
-        ordered = sorted(normalized_articles)
-        for chunk in _chunked(ordered, _BATCH_SIZE):
-            tasks = [
-                _fetch_article(
-                    client,
-                    article=article,
-                    quantity_field=settings.moysklad_quantity_field,
-                    allowed_articles=normalized_articles,
-                    semaphore=semaphore,
-                )
-                for article in chunk
-            ]
-            responses = await asyncio.gather(*tasks, return_exceptions=True)
-            for response in responses:
-                if isinstance(response, BaseException):
-                    raise response
-                for key, value in response.items():
-                    results[key] = results.get(key, Decimal("0")) + value
+        for article in sorted(normalized_articles):
+            response = await _fetch_article(
+                client,
+                article=article,
+                quantity_field=settings.moysklad_quantity_field,
+                allowed_articles=normalized_articles,
+                semaphore=semaphore,
+            )
+            for key, value in response.items():
+                results[key] = results.get(key, Decimal("0")) + value
     return results
 
 

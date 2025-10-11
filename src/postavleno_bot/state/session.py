@@ -58,6 +58,13 @@ session_storage = SessionStorage()
 
 
 def nav_push(session: ChatSession, screen: ScreenState) -> None:
+    if (
+        session.history
+        and session.history[-1].name == screen.name
+        and session.history[-1].params == screen.params
+    ):
+        session.history[-1] = screen
+        return
     session.history.append(screen)
 
 
@@ -72,8 +79,8 @@ def nav_back(session: ChatSession) -> ScreenState | None:
     if not session.history:
         return None
 
-    if len(session.history) == 1:
-        return session.history[0]
+    if len(session.history) <= 1:
+        return None
 
     session.history.pop()
     return session.history[-1]
