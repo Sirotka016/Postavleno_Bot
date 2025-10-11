@@ -3,6 +3,8 @@
 from .card import card_manager
 from .keyboards import (
     kb_auth_menu,
+    kb_delete_confirm,
+    kb_delete_error,
     kb_edit_email,
     kb_edit_ms,
     kb_edit_wb,
@@ -23,6 +25,8 @@ __all__ = [
     "kb_profile",
     "kb_register",
     "kb_unknown",
+    "kb_delete_confirm",
+    "kb_delete_error",
     "kb_edit_email",
     "kb_edit_wb",
     "kb_edit_ms",

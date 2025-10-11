@@ -14,11 +14,10 @@ from .pages import (
     render_edit_email,
     render_edit_ms,
     render_edit_wb,
-    render_home,
     render_profile,
     render_require_auth,
 )
-from .utils import delete_user_message, load_active_profile, set_auth_user
+from .utils import delete_user_message, load_active_profile
 
 router = Router()
 
@@ -33,23 +32,6 @@ async def refresh_profile(callback: CallbackQuery, state: FSMContext) -> None:
         await render_require_auth(callback.bot, state, callback.message.chat.id, nav_action="replace")
         return
     await render_profile(callback.bot, state, callback.message.chat.id, profile, nav_action="replace")
-
-
-@router.callback_query(F.data == "profile.logout")
-async def logout_profile(callback: CallbackQuery, state: FSMContext) -> None:
-    if callback.message is None:
-        return
-    await callback.answer()
-    await set_auth_user(state, None)
-    await state.set_state(None)
-    await render_home(
-        callback.bot,
-        state,
-        callback.message.chat.id,
-        nav_action="root",
-        is_authed=False,
-        profile=None,
-    )
 
 
 @router.callback_query(F.data == "profile.wb")

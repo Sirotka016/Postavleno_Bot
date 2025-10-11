@@ -8,6 +8,7 @@ from aiogram.types import CallbackQuery, Message
 
 from ..navigation import (
     SCREEN_AUTH_MENU,
+    SCREEN_DELETE_CONFIRM,
     SCREEN_HOME,
     SCREEN_LOGIN,
     SCREEN_PROFILE,
@@ -16,6 +17,8 @@ from ..navigation import (
 )
 from ..state import LoginStates, RegisterStates
 from .pages import (
+    render_delete_confirm,
+    render_delete_error,
     render_home,
     render_login,
     render_profile,
@@ -75,6 +78,13 @@ async def repeat_previous(callback: CallbackQuery, state: FSMContext) -> None:
             await render_require_auth(callback.bot, state, callback.message.chat.id, nav_action="replace")
         else:
             await render_profile(callback.bot, state, callback.message.chat.id, profile, nav_action="replace")
+    elif previous.name == SCREEN_DELETE_CONFIRM:
+        if previous.params.get("error"):
+            await render_delete_error(callback.bot, state, callback.message.chat.id, nav_action="replace")
+        elif not profile:
+            await render_require_auth(callback.bot, state, callback.message.chat.id, nav_action="replace")
+        else:
+            await render_delete_confirm(callback.bot, state, callback.message.chat.id, nav_action="replace")
     else:
         await render_home(
             callback.bot,

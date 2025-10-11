@@ -9,6 +9,7 @@ from aiogram.fsm.context import FSMContext
 
 from ..navigation import (
     SCREEN_AUTH_MENU,
+    SCREEN_DELETE_CONFIRM,
     SCREEN_EDIT_EMAIL,
     SCREEN_EDIT_MS,
     SCREEN_EDIT_WB,
@@ -36,15 +37,24 @@ from ..ui import (
     kb_retry_login,
     kb_retry_register,
     kb_unknown,
+    kb_delete_confirm,
+    kb_delete_error,
 )
 
-GUEST_HOME_TEXT = "Привет! Я Postavleno_Bot.\nНачните с авторизации или регистрации."
+GUEST_HOME_TEXT = (
+    "Привет! Я Postavleno_Bot 👋\n"
+    "Помогаю работать с Wildberries и МойСклад. Начнём с входа в аккаунт.\n\n"
+    "Выберите действие:\n"
+    "• Авторизация — войти в существующий аккаунт\n"
+    "• Регистрация — создать новый"
+)
 
 AUTH_HOME_TEMPLATE = (
-    "👤 Профиль: {name}\n\n"
-    "WB API: {wb}\n"
-    "МойСклад API: {ms}\n\n"
-    "Вы можете открыть профиль и изменить данные."
+    "Добро пожаловать, {name}!\n\n"
+    "Статус интеграций:\n"
+    "• WB API: {wb}\n"
+    "• МойСклад API: {ms}\n\n"
+    "Откройте профиль, чтобы изменить данные."
 )
 
 REQUIRE_AUTH_TEXT = "Требуется авторизация."
@@ -62,7 +72,15 @@ EDIT_EMAIL_TEXT = "📧 Почта\n\nСкоро здесь появится п�
 LOGIN_ERROR_TEXT = "Аккаунт не найден."
 REGISTER_TAKEN_TEXT = "Логин занят, придумайте другой."
 SUCCESS_SAVED = "Сохранено."
-UNKNOWN_TEXT = "Я не понял запрос 🤔\nВыберите действие:"
+UNKNOWN_TEXT = "Хмм… я не понял запрос 🤔\nВыберите, что сделать дальше."
+
+DELETE_CONFIRM_TEXT = (
+    "Удаление аккаунта\n\n"
+    "Это действие навсегда удалит ваш аккаунт и все связанные данные на этом компьютере. Отменить нельзя.\n\n"
+    "Вы уверены?"
+)
+
+DELETE_ERROR_TEXT = "Не удалось удалить аккаунт. Попробуйте позже."
 
 
 async def _apply_nav(state: FSMContext, action: str, screen: ScreenState) -> None:
@@ -96,6 +114,40 @@ async def render_home(
         )
         keyboard = kb_home(True)
     return await card_manager.render(bot, chat_id, text, reply_markup=keyboard, state=state)
+
+
+async def render_delete_confirm(
+    bot: Bot,
+    state: FSMContext,
+    chat_id: int,
+    *,
+    nav_action: str = "push",
+) -> int:
+    await _apply_nav(state, nav_action, ScreenState(SCREEN_DELETE_CONFIRM))
+    return await card_manager.render(
+        bot,
+        chat_id,
+        DELETE_CONFIRM_TEXT,
+        reply_markup=kb_delete_confirm(),
+        state=state,
+    )
+
+
+async def render_delete_error(
+    bot: Bot,
+    state: FSMContext,
+    chat_id: int,
+    *,
+    nav_action: str = "replace",
+) -> int:
+    await _apply_nav(state, nav_action, ScreenState(SCREEN_DELETE_CONFIRM, {"error": True}))
+    return await card_manager.render(
+        bot,
+        chat_id,
+        DELETE_ERROR_TEXT,
+        reply_markup=kb_delete_error(),
+        state=state,
+    )
 
 
 async def render_require_auth(
@@ -199,7 +251,6 @@ async def render_profile(
         f"Дата регистрации: {_format_datetime(profile.created_at)}",
         "",
         f"Почта: {email}",
-        "",
         f"WB API: {wb_state}",
         f"МойСклад API: {ms_state}",
     ]
