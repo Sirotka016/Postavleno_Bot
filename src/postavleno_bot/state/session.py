@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -16,6 +17,9 @@ class ChatSession:
     last_bot_message_id: int | None = None
     history: list[ScreenState] = field(default_factory=list)
     pending_input: str | None = None
+    authorized_login: str | None = None
+    temp: dict[str, Any] = field(default_factory=dict)
+    login_attempts: deque[float] = field(default_factory=deque)
 
 
 class SessionStorage:

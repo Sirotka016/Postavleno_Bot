@@ -7,10 +7,10 @@ from aiogram.types import BotCommand, BotCommandScopeDefault
 
 from .core.config import Settings
 from .core.logging import get_logger
-from .db.engine import create_all
 from .handlers.menu import MENU_ROUTER
 from .middlewares.request_id import RequestIdMiddleware
 from .middlewares.user_context import UserContextMiddleware
+from .services.users import get_user_storage
 
 BOT_COMMANDS = [
     BotCommand(command="start", description="Запустить бота"),
@@ -19,7 +19,7 @@ BOT_COMMANDS = [
 
 async def _on_startup(bot: Bot) -> None:
     logger = get_logger(__name__).bind(action="startup")
-    await create_all()
+    get_user_storage()
     await bot.set_my_commands(commands=BOT_COMMANDS, scope=BotCommandScopeDefault())
     logger.info("Команды обновлены", commands=[command.command for command in BOT_COMMANDS])
 
