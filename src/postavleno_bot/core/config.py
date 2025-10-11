@@ -49,9 +49,14 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("MOYSKLAD_PAGE_SIZE"),
         description="Количество строк, загружаемых за один запрос к /report/stock/all",
     )
-    brand_store_name: str = Field(
+    moysklad_quantity_field: Literal["quantity", "stock"] = Field(
+        "quantity",
+        validation_alias=AliasChoices("MOYSKLAD_QUANTITY_FIELD"),
+        description="Какое поле использовать из ответов МойСклад при подсчёте остатков",
+    )
+    local_store_name: str = Field(
         "FootballShop",
-        validation_alias=AliasChoices("BRAND_STORE_NAME"),
+        validation_alias=AliasChoices("LOCAL_STORE_NAME", "BRAND_STORE_NAME"),
         description='Значение колонки "Склад" для итоговой выгрузки',
     )
 

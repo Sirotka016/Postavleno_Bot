@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
 import structlog
 from aiogram import Bot, F, Router
 from aiogram.filters import Command
@@ -22,7 +23,7 @@ from structlog.stdlib import BoundLogger
 
 from ..core.config import get_settings
 from ..core.logging import get_logger
-from ..integrations.moysklad import fetch_moysklad_stock_map
+from ..integrations.moysklad import fetch_quantities_for_articles, norm_article
 from ..integrations.wb_client import WBApiError, WBAuthError, WBRatelimitError, WBStockItem
 from ..services.export import save_dataframe_to_xlsx
 from ..services.stocks import (
@@ -37,7 +38,7 @@ from ..services.stocks import (
     get_stock_data,
     summarize_by_warehouse,
 )
-from ..services.store_stock_merge import merge_moysklad_into_wb
+from ..services.store_stock_merge import merge_ms_into_wb
 from ..state.session import (
     ChatSession,
     ScreenState,
@@ -328,18 +329,11 @@ async def _load_stocks(token: str, *, force_refresh: bool) -> list[WBStockItem]:
 async def maybe_delete_user_message(
     *, bot: Bot, message: Message, session: ChatSession, logger: BoundLogger | None = None
 ) -> bool:
-    """Delete a user message if uploads are not expected."""
+    """Best-effort deletion of user messages to keep chat clean."""
 
-    if session.expecting_upload:
-        if logger is not None:
-            logger.debug(
-                "user message preserved (expecting upload)",
-                expecting_upload=session.expecting_upload,
-            )
-        return False
-
-    await safe_delete(bot, chat_id=message.chat.id, message_id=message.message_id)
-    return True
+    if logger is not None:
+        logger.debug("Удаляю пользовательское сообщение")
+    return await safe_delete(bot, chat_id=message.chat.id, message_id=message.message_id)
 
 
 def _build_error_response(error: Exception) -> tuple[str, InlineKeyboardMarkup]:
@@ -363,7 +357,6 @@ async def _render_main_menu(bot: Bot, chat_id: int) -> int | None:
         stocks_view=None,
         stocks_wh_map={},
         stocks_page=1,
-        expecting_upload=False,
     )
     return await _render_card(
         bot=bot,
@@ -512,13 +505,15 @@ def build_single_view_text(
     return text, total_pages, page_number
 
 
-def build_store_menu_text(note: str | None = None) -> str:
+def build_store_menu_text(*, status: str | None = None, note: str | None = None) -> str:
     lines = [
         "<b>🏬 Остатки склада</b>",
         "",
         "Здесь я формирую файл, совпадающий со структурой выгрузки WB,",
         "но с количеством с вашего склада (МойСклад).",
     ]
+    if status:
+        lines.extend(["", status])
     if note:
         lines.extend(["", note])
     return "\n".join(lines)
@@ -554,11 +549,10 @@ async def _render_store_menu(
         nav_push(session, state)
     else:
         nav_replace(session, state)
-    await session_storage.update_session(chat_id, expecting_upload=False)
     return await _render_card(
         bot=bot,
         chat_id=chat_id,
-        text=build_store_menu_text(note),
+        text=build_store_menu_text(note=note),
         inline_markup=build_store_menu_keyboard(),
     )
 
@@ -580,7 +574,6 @@ async def _render_stocks_entry(
         stocks_view=None,
         stocks_wh_map={},
         stocks_page=1,
-        expecting_upload=False,
     )
 
     settings = get_settings()
@@ -648,7 +641,6 @@ async def _render_warehouses_list(
         stocks_view="summary",
         stocks_wh_map=mapping,
         stocks_page=1,
-        expecting_upload=False,
     )
 
     message_id = await _render_card(
@@ -703,7 +695,6 @@ async def _render_all_view(
         stocks_view="ALL",
         stocks_page=page_number,
         stocks_wh_map=_build_warehouse_mapping(summaries),
-        expecting_upload=False,
     )
 
     message_id = await _render_card(
@@ -787,7 +778,6 @@ async def _render_single_view(
         stocks_view=warehouse_code,
         stocks_page=page_number,
         stocks_wh_map=_build_warehouse_mapping(summaries),
-        expecting_upload=False,
     )
 
     message_id = await _render_card(
@@ -1011,11 +1001,7 @@ async def handle_text_message(
     with _action_logger("user_text", request_id) as logger:
         chat_id = message.chat.id
         session = await _ensure_session(chat_id)
-        logger.info(
-            "Получен текст пользователя",
-            text=message.text,
-            expecting_upload=session.expecting_upload,
-        )
+        logger.info("Получен текст пользователя", text=message.text)
 
         deleted = await maybe_delete_user_message(
             bot=bot,
@@ -1026,12 +1012,7 @@ async def handle_text_message(
 
         latency_ms = _calc_latency(started_at)
         structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
-        logger.info(
-            "Сообщение пользователя обработано",
-            result="ok",
-            deleted=deleted,
-            expecting_upload=session.expecting_upload,
-        )
+        logger.info("Сообщение пользователя обработано", result="ok", deleted=deleted)
         structlog.contextvars.unbind_contextvars("latency_ms")
 
 
@@ -1042,7 +1023,7 @@ async def handle_user_message(
     with _action_logger("user_message", request_id) as logger:
         chat_id = message.chat.id
         session = await _ensure_session(chat_id)
-        logger.info("Получено сообщение пользователя", expecting_upload=session.expecting_upload)
+        logger.info("Получено сообщение пользователя")
 
         deleted = await maybe_delete_user_message(
             bot=bot,
@@ -1053,12 +1034,7 @@ async def handle_user_message(
 
         latency_ms = _calc_latency(started_at)
         structlog.contextvars.bind_contextvars(latency_ms=latency_ms)
-        logger.info(
-            "Сообщение пользователя обработано",
-            result="ok",
-            deleted=deleted,
-            expecting_upload=session.expecting_upload,
-        )
+        logger.info("Сообщение пользователя обработано", result="ok", deleted=deleted)
         structlog.contextvars.unbind_contextvars("latency_ms")
 
 
@@ -1545,7 +1521,7 @@ async def handle_store_get(
             bot,
             chat_id=chat_id,
             message_id=message_id,
-            text=build_store_menu_text(),
+            text=build_store_menu_text(status="⌛ Получаю остатки: WB → список артикулов…"),
             inline_markup=build_store_menu_keyboard(loading=True),
         )
 
@@ -1562,20 +1538,63 @@ async def handle_store_get(
             token = token_secret.get_secret_value()
             items = await _load_stocks(token, force_refresh=False)
             wb_df = build_export_dataframe(items)
+            wb_rows = len(wb_df)
 
-            stock_map = await fetch_moysklad_stock_map(settings)
-            logger.info("merge.start", rows=len(wb_df))
-            merged = merge_moysklad_into_wb(
+            def _pick_column(df: pd.DataFrame, options: tuple[str, ...], label: str) -> str:
+                for option in options:
+                    if option in df.columns:
+                        return option
+                raise RuntimeError(f"Не найден столбец {label!r} в выгрузке WB")
+
+            art_col = _pick_column(wb_df, ("Артикул", "supplierArticle"), "артикул")
+            qty_col = _pick_column(wb_df, ("Кол-во", "quantity"), "количество")
+            warehouse_col = _pick_column(wb_df, ("Склад", "warehouseName"), "склад")
+
+            articles_series = wb_df[art_col].fillna("").astype(str)
+            wb_articles = {norm_article(value) for value in articles_series if value.strip()}
+
+            await safe_edit(
+                bot,
+                chat_id=chat_id,
+                message_id=message_id,
+                text=build_store_menu_text(
+                    status="⌛ Получаю остатки: МойСклад → обновляю количества…"
+                ),
+                inline_markup=build_store_menu_keyboard(loading=True),
+            )
+
+            stock_map = await fetch_quantities_for_articles(settings, wb_articles)
+            ms_found = len(stock_map)
+            ms_missing = max(len(wb_articles) - ms_found, 0)
+            logger.info(
+                "store.merge.inputs",
+                wb_rows=wb_rows,
+                wb_unique=len(wb_articles),
+                ms_found=ms_found,
+                ms_missing=ms_missing,
+                quantity_field=settings.moysklad_quantity_field,
+            )
+
+            merged = merge_ms_into_wb(
                 wb_df,
                 stock_map,
-                brand_store=settings.brand_store_name,
+                store_name=settings.local_store_name,
+                qty_col=qty_col,
+                art_col=art_col,
+                warehouse_col=warehouse_col,
             )
-            stats = merged.attrs.get("merge_stats", {})
-            logger.info("merge.stats", **stats)
+
+            await safe_edit(
+                bot,
+                chat_id=chat_id,
+                message_id=message_id,
+                text=build_store_menu_text(status="⌛ Формирую Excel…"),
+                inline_markup=build_store_menu_keyboard(loading=True),
+            )
 
             exports_dir = Path("var/exports")
             timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-            sheet_name = (settings.brand_store_name or "WB").strip() or "WB"
+            sheet_name = (settings.local_store_name or "WB").strip() or "WB"
             for char in "[]:*?/\\":
                 sheet_name = sheet_name.replace(char, "_")
             sheet_name = sheet_name[:31] or "WB"
@@ -1584,13 +1603,17 @@ async def handle_store_get(
                 path=exports_dir / f"ostatki_store_{timestamp}.xlsx",
                 sheet_name=sheet_name,
             )
-            logger.info("export.saved", path=str(file_path), rows_total=stats.get("rows_total"))
+            logger.info(
+                "store.export.saved",
+                export_path=str(file_path),
+                rows_total=wb_rows,
+            )
 
             document = BufferedInputFile(file_path.read_bytes(), file_path.name)
             await bot.send_document(chat_id=chat_id, document=document)
-            logger.info("export.sent", filename=file_path.name)
+            logger.info("store.export.sent", filename=file_path.name)
 
-            note = "Готово! Отправил файл с остатками в чат."
+            note = "✅ Готово! Отправил файл с остатками в чат."
             success = True
         except WBApiError as error:
             if isinstance(error, WBRatelimitError):
@@ -1621,6 +1644,6 @@ async def handle_store_get(
                 bot,
                 chat_id=chat_id,
                 message_id=message_id,
-                text=build_store_menu_text(note),
+                text=build_store_menu_text(note=note),
                 inline_markup=build_store_menu_keyboard(),
             )
