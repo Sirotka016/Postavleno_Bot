@@ -38,19 +38,16 @@ from ..ui import (
     kb_unknown,
 )
 
-HOME_TEXT = (
-    "Привет! Я Postavleno_Bot.\n"
-    "Скоро здесь появится вся нужная информация. А пока — начните с авторизации."
+GUEST_HOME_TEXT = "Привет! Я Postavleno_Bot.\nНачните с авторизации или регистрации."
+
+AUTH_HOME_TEMPLATE = (
+    "👤 Профиль: {name}\n\n"
+    "WB API: {wb}\n"
+    "МойСклад API: {ms}\n\n"
+    "Вы можете открыть профиль и изменить данные."
 )
 
-AUTH_MENU_TEXT = (
-    "🔐 Авторизация\n\n"
-    "Вы можете войти в существующий аккаунт или создать новый.\n\n"
-    "• Авторизация — введите логин и пароль.\n"
-    "• Регистрация — придумайте логин и пароль.\n\n"
-    "Логин: латиница, цифры, точка, дефис, подчёркивание (3–32).\n"
-    "Пароль: минимум 6 символов."
-)
+REQUIRE_AUTH_TEXT = "Требуется авторизация."
 
 LOGIN_TEXT = "🔑 Вход в аккаунт\n\nВведите логин."
 LOGIN_PASSWORD_TEXT = "🔑 Вход в аккаунт\n\nВведите пароль."
@@ -77,19 +74,38 @@ async def _apply_nav(state: FSMContext, action: str, screen: ScreenState) -> Non
         await nav_replace(state, screen)
 
 
-async def render_home(bot: Bot, state: FSMContext, chat_id: int, *, nav_action: str = "root") -> int:
+async def render_home(
+    bot: Bot,
+    state: FSMContext,
+    chat_id: int,
+    *,
+    nav_action: str = "root",
+    is_authed: bool = False,
+    profile: AccountProfile | None = None,
+) -> int:
     await _apply_nav(state, nav_action, ScreenState(SCREEN_HOME))
-    return await card_manager.render(bot, chat_id, HOME_TEXT, reply_markup=kb_home(), state=state)
+    if not is_authed or profile is None:
+        text = GUEST_HOME_TEXT
+        keyboard = kb_home(False)
+    else:
+        name = profile.company_name or profile.display_login
+        text = AUTH_HOME_TEMPLATE.format(
+            name=name,
+            wb="✅" if profile.wb_api else "—",
+            ms="✅" if profile.ms_api else "—",
+        )
+        keyboard = kb_home(True)
+    return await card_manager.render(bot, chat_id, text, reply_markup=keyboard, state=state)
 
 
-async def render_auth_menu(
+async def render_require_auth(
     bot: Bot, state: FSMContext, chat_id: int, *, nav_action: str = "replace"
 ) -> int:
     await _apply_nav(state, nav_action, ScreenState(SCREEN_AUTH_MENU))
     return await card_manager.render(
         bot,
         chat_id,
-        AUTH_MENU_TEXT,
+        REQUIRE_AUTH_TEXT,
         reply_markup=kb_auth_menu(),
         state=state,
     )
@@ -171,8 +187,8 @@ async def render_profile(
     extra: str | None = None,
 ) -> int:
     await _apply_nav(state, nav_action, ScreenState(SCREEN_PROFILE))
-    wb_state = "✅ подключен" if profile.wb_api else "—"
-    ms_state = "✅ подключен" if profile.ms_api else "—"
+    wb_state = "✅" if profile.wb_api else "—"
+    ms_state = "✅" if profile.ms_api else "—"
     email = profile.email or "—"
     company = profile.company_name or profile.display_login
     lines = [

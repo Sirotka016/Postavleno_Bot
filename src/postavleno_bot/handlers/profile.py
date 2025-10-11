@@ -7,31 +7,20 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from ..domain import validate_ms, validate_wb
-from ..services.accounts import AccountNotFoundError, get_accounts_repo
+from ..services.accounts import get_accounts_repo
 from ..state import EditMSState, EditWBState
 from .pages import (
     SUCCESS_SAVED,
-    render_auth_menu,
     render_edit_email,
     render_edit_ms,
     render_edit_wb,
+    render_home,
     render_profile,
+    render_require_auth,
 )
-from .utils import delete_user_message, get_auth_user, set_auth_user
+from .utils import delete_user_message, load_active_profile, set_auth_user
 
 router = Router()
-
-
-async def _load_profile(state: FSMContext):
-    repo = get_accounts_repo()
-    username = await get_auth_user(state)
-    if not username:
-        return None
-    try:
-        return repo.get(username)
-    except AccountNotFoundError:
-        await set_auth_user(state, None)
-        return None
 
 
 @router.callback_query(F.data == "profile.refresh")
@@ -39,9 +28,9 @@ async def refresh_profile(callback: CallbackQuery, state: FSMContext) -> None:
     if callback.message is None:
         return
     await callback.answer()
-    profile = await _load_profile(state)
+    profile = await load_active_profile(state)
     if not profile:
-        await render_auth_menu(callback.bot, state, callback.message.chat.id, nav_action="replace")
+        await render_require_auth(callback.bot, state, callback.message.chat.id, nav_action="replace")
         return
     await render_profile(callback.bot, state, callback.message.chat.id, profile, nav_action="replace")
 
@@ -53,7 +42,14 @@ async def logout_profile(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await set_auth_user(state, None)
     await state.set_state(None)
-    await render_auth_menu(callback.bot, state, callback.message.chat.id, nav_action="replace")
+    await render_home(
+        callback.bot,
+        state,
+        callback.message.chat.id,
+        nav_action="root",
+        is_authed=False,
+        profile=None,
+    )
 
 
 @router.callback_query(F.data == "profile.wb")
@@ -61,9 +57,9 @@ async def edit_wb(callback: CallbackQuery, state: FSMContext) -> None:
     if callback.message is None:
         return
     await callback.answer()
-    profile = await _load_profile(state)
+    profile = await load_active_profile(state)
     if not profile:
-        await render_auth_menu(callback.bot, state, callback.message.chat.id, nav_action="replace")
+        await render_require_auth(callback.bot, state, callback.message.chat.id, nav_action="replace")
         return
     await state.set_state(EditWBState.await_token)
     await render_edit_wb(callback.bot, state, callback.message.chat.id, nav_action="push")
@@ -74,9 +70,9 @@ async def edit_ms(callback: CallbackQuery, state: FSMContext) -> None:
     if callback.message is None:
         return
     await callback.answer()
-    profile = await _load_profile(state)
+    profile = await load_active_profile(state)
     if not profile:
-        await render_auth_menu(callback.bot, state, callback.message.chat.id, nav_action="replace")
+        await render_require_auth(callback.bot, state, callback.message.chat.id, nav_action="replace")
         return
     await state.set_state(EditMSState.await_token)
     await render_edit_ms(callback.bot, state, callback.message.chat.id, nav_action="push")
@@ -104,9 +100,9 @@ async def handle_wb_token(message: Message, state: FSMContext) -> None:
         )
         return
     repo = get_accounts_repo()
-    profile = await _load_profile(state)
+    profile = await load_active_profile(state)
     if not profile:
-        await render_auth_menu(message.bot, state, message.chat.id, nav_action="replace")
+        await render_require_auth(message.bot, state, message.chat.id, nav_action="replace")
         return
     updated = repo.set_wb_api(profile.username, token)
     await state.set_state(None)
@@ -134,9 +130,9 @@ async def handle_ms_token(message: Message, state: FSMContext) -> None:
         )
         return
     repo = get_accounts_repo()
-    profile = await _load_profile(state)
+    profile = await load_active_profile(state)
     if not profile:
-        await render_auth_menu(message.bot, state, message.chat.id, nav_action="replace")
+        await render_require_auth(message.bot, state, message.chat.id, nav_action="replace")
         return
     updated = repo.set_ms_api(profile.username, token)
     await state.set_state(None)

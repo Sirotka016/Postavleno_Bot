@@ -14,14 +14,22 @@ def _build(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
     )
 
 
-def kb_home() -> InlineKeyboardMarkup:
-    return _build(
-        [
-            [("Авторизация", "home.auth")],
+def kb_home(is_authed: bool) -> InlineKeyboardMarkup:
+    if is_authed:
+        rows = [
+            [("Профиль", "home.profile")],
+            [("Выйти с Профиля", "home.logout_profile")],
             [("Обновить", "home.refresh")],
             [("Выйти", "home.exit")],
         ]
-    )
+    else:
+        rows = [
+            [("Авторизация", "auth.login")],
+            [("Регистрация", "auth.register")],
+            [("Обновить", "home.refresh")],
+            [("Выйти", "home.exit")],
+        ]
+    return _build(rows)
 
 
 def kb_auth_menu() -> InlineKeyboardMarkup:
@@ -29,8 +37,6 @@ def kb_auth_menu() -> InlineKeyboardMarkup:
         [
             [("Авторизация", "auth.login")],
             [("Регистрация", "auth.register")],
-            [("Обновить", "auth.refresh")],
-            [("Назад", "nav.back")],
             [("Выйти", "home.exit")],
         ]
     )
@@ -99,7 +105,7 @@ def kb_unknown() -> InlineKeyboardMarkup:
     return _build(
         [
             [("Повторить", "unknown.repeat")],
-            [("Выйти", "home.exit")],
+            [("Выйти", "unknown.exit")],
         ]
     )
 
