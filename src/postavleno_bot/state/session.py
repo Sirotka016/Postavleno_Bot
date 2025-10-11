@@ -19,7 +19,6 @@ class ChatSession:
     stocks_wh_map: dict[str, str] = field(default_factory=dict)
     stocks_view: str | None = None  # "ALL" | "wh:abcd1234" | "summary" | None
     stocks_page: int = 1  # current page (>=1)
-    expecting_upload: bool = False  # when True, keep user messages (documents/text)
 
 
 class SessionStorage:
