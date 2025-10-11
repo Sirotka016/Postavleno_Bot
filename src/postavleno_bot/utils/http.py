@@ -5,43 +5,73 @@ from collections.abc import Iterable
 from typing import Any
 
 import httpx
+import structlog
 
+from ..core.config import get_settings
 from ..core.logging import get_logger
 
+_log = structlog.get_logger("http")
 _WB_BASE_URL = "https://statistics-api.wildberries.ru"
 _MS_BASE_URL = "https://api.moysklad.ru/api/remap/1.2"
-_DEFAULT_TIMEOUT = httpx.Timeout(30.0, read=30.0, write=30.0, connect=30.0)
-_MS_TIMEOUT = httpx.Timeout(60.0, read=60.0, write=60.0, connect=60.0)
+
+
+def _http2_available() -> bool:
+    try:  # pragma: no cover - import check
+        import h2  # noqa: F401
+
+        return True
+    except Exception:
+        return False
+
+
+def _decide_http2() -> bool:
+    settings = get_settings()
+    requested = settings.http2_enabled
+    if requested and not _http2_available():
+        _log.warning("http2.requested_but_unavailable", outcome="fallback_to_http1")
+        return False
+    return requested
 
 
 def create_wb_client(*, headers: dict[str, str] | None = None) -> httpx.AsyncClient:
     """Return a configured AsyncClient for Wildberries API."""
 
+    settings = get_settings()
+    use_http2 = _decide_http2()
     base_headers = {"Accept-Encoding": "gzip"}
     if headers:
         base_headers.update(headers)
-    return httpx.AsyncClient(
+    client = httpx.AsyncClient(
         base_url=_WB_BASE_URL,
         headers=base_headers,
-        http2=True,
-        timeout=_DEFAULT_TIMEOUT,
+        http2=use_http2,
+        timeout=settings.http_timeout_s,
     )
+    setattr(client, "_postavleno_http2", use_http2)
+    setattr(client, "_postavleno_timeout", settings.http_timeout_s)
+    return client
 
 
-def create_ms_client(*, headers: dict[str, str]) -> httpx.AsyncClient:
+def create_ms_client(*, headers: dict[str, str] | None = None) -> httpx.AsyncClient:
     """Return a configured AsyncClient for MoySklad API."""
 
+    settings = get_settings()
+    use_http2 = _decide_http2()
     base_headers = {
         "Accept-Encoding": "gzip",
         "User-Agent": "PostavlenoBot/1.0",
-        **headers,
     }
-    return httpx.AsyncClient(
+    if headers:
+        base_headers.update(headers)
+    client = httpx.AsyncClient(
         base_url=_MS_BASE_URL,
         headers=base_headers,
-        http2=True,
-        timeout=_MS_TIMEOUT,
+        http2=use_http2,
+        timeout=settings.http_timeout_s,
     )
+    setattr(client, "_postavleno_http2", use_http2)
+    setattr(client, "_postavleno_timeout", settings.http_timeout_s)
+    return client
 
 
 async def request_with_retry(

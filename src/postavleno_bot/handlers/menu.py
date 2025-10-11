@@ -658,6 +658,20 @@ async def _render_warehouses_list(
             inline_markup=keyboard,
         )
         return message_id, {"outcome": "error"}
+    except Exception as error:
+        logger = get_logger(__name__)
+        logger.error("wb.fetch.failed", outcome="error", err=str(error))
+        nav_replace(session, ScreenState(name=SCREEN_WB_OPEN, params={}))
+        message_id = await _render_card(
+            bot=bot,
+            chat_id=chat_id,
+            text=(
+                "<b>📦 Остатки на складах WB</b>\n\n"
+                "Не удалось связаться с сервисом, попробуйте ещё раз: 🔄 Обновить"
+            ),
+            inline_markup=build_error_keyboard(),
+        )
+        return message_id, {"outcome": "error"}
 
     summaries = summarize_by_warehouse(items)
     keyboard, mapping = build_warehouses_keyboard(summaries)
@@ -1671,8 +1685,13 @@ async def handle_store_get(
             if note is None:
                 note = f"⚠️ {error}"
         except Exception as error:  # pragma: no cover - unexpected branch
-            logger.exception("Неожиданная ошибка при формировании остатков", err=str(error))
-            note = "⚠️ Не удалось сформировать файл. Попробуйте позже."
+            logger.error(
+                "store.fetch.failed",
+                outcome="error",
+                err=str(error),
+                exc_info=True,
+            )
+            note = "Не удалось связаться с сервисом, попробуйте ещё раз: 🔄 Обновить"
         finally:
             latency_ms = _calc_latency(started_at)
             structlog.contextvars.bind_contextvars(latency_ms=latency_ms)

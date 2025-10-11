@@ -134,14 +134,19 @@ def _convert_item(data: dict[str, Any]) -> WBStockItem:
     )
 
 
-async def fetch_stocks_all(token: str, *, date_from: datetime) -> list[WBStockItem]:
+async def fetch_stocks_all(token: str, *, date_from: datetime) -> tuple[list[WBStockItem], dict[str, Any]]:
     """Выгружает все остатки по правилам пагинации 'supplier/stocks'."""
 
     headers = {"Authorization": token}
     params = {"dateFrom": date_from.isoformat()}
     items: list[WBStockItem] = []
 
+    metadata: dict[str, Any] = {}
     async with create_wb_client() as client:
+        metadata = {
+            "http2": bool(getattr(client, "_postavleno_http2", False)),
+            "timeout_s": float(getattr(client, "_postavleno_timeout", 0.0)),
+        }
         page_idx = 0
         current_date_from = params["dateFrom"]
         while True:
@@ -161,4 +166,4 @@ async def fetch_stocks_all(token: str, *, date_from: datetime) -> list[WBStockIt
             current_date_from = str(last_entry.get("lastChangeDate", current_date_from))
             page_idx += 1
 
-    return items
+    return items, metadata
