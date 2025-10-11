@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from functools import lru_cache
+from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
 
@@ -29,18 +31,34 @@ def _get_fernet() -> Fernet:
         raise SecretKeyError("Invalid SECRET_KEY") from exc
 
 
-def encrypt_str(text: str) -> bytes:
+def encrypt_bytes(data: bytes) -> bytes:
     fernet = _get_fernet()
-    token: bytes = fernet.encrypt(text.encode("utf-8"))
-    return token
+    return fernet.encrypt(data)
+
+
+def decrypt_bytes(blob: bytes) -> bytes:
+    fernet = _get_fernet()
+    try:
+        return fernet.decrypt(blob)
+    except InvalidToken as exc:  # pragma: no cover - defensive branch
+        logger = get_logger(__name__).bind(action="crypto.decrypt")
+        logger.error("Ошибка расшифровки", outcome="fail")
+        raise SecretKeyError("Failed to decrypt data") from exc
 
 
 def decrypt_str(blob: bytes) -> str:
-    fernet = _get_fernet()
-    try:
-        decrypted_bytes: bytes = fernet.decrypt(blob)
-    except InvalidToken as exc:  # pragma: no cover - defensive branch
-        logger = get_logger(__name__).bind(action="crypto.decrypt")
-        logger.error("Ошибка расшифровки токена", outcome="fail")
-        raise SecretKeyError("Failed to decrypt data") from exc
-    return decrypted_bytes.decode("utf-8")
+    return decrypt_bytes(blob).decode("utf-8")
+
+
+def encrypt_str(text: str) -> bytes:
+    return encrypt_bytes(text.encode("utf-8"))
+
+
+def encrypt_json(data: Any) -> bytes:
+    payload = json.dumps(data, ensure_ascii=False).encode("utf-8")
+    return encrypt_bytes(payload)
+
+
+def decrypt_json(blob: bytes) -> Any:
+    plaintext = decrypt_bytes(blob).decode("utf-8")
+    return json.loads(plaintext)

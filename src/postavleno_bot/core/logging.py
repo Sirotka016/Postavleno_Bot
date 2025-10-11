@@ -7,13 +7,22 @@ from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 from typing import Any, cast
 
-import orjson
 import structlog
 from rich.console import Console
 from rich.logging import RichHandler
 from structlog.typing import Processor
 
-_RESERVED_KEYS = {"result"}
+try:  # pragma: no cover - optional dependency branch
+    import orjson as _json_impl
+
+    def _dumps(obj: Any) -> str:
+        return _json_impl.dumps(obj, option=_json_impl.OPT_APPEND_NEWLINE).decode()
+
+except Exception:  # pragma: no cover - fallback for environments without orjson
+    import json
+
+    def _dumps(obj: Any) -> str:
+        return json.dumps(obj, ensure_ascii=False) + "\n"
 
 
 def _sanitize_fields(
@@ -85,7 +94,7 @@ def _console_renderer(
 def _json_renderer(
     _: structlog.types.WrappedLogger, __: str, event_dict: MutableMapping[str, Any]
 ) -> str:
-    return orjson.dumps(event_dict, option=orjson.OPT_APPEND_NEWLINE).decode()
+    return _dumps(event_dict)
 
 
 def _create_rich_handler() -> RichHandler:

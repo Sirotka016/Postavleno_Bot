@@ -1,113 +1,139 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
+import json
+from pathlib import Path
 
 import pytest
+from PIL import Image
 
-from postavleno_bot.handlers import menu
-from postavleno_bot.state.session import session_storage
-from postavleno_bot.utils.strings import mask_secret
+from postavleno_bot.core.config import get_settings
+from postavleno_bot.core.crypto import decrypt_json
+from postavleno_bot.handlers.menu import _prepare_avatar
+from postavleno_bot.services.users import (
+    InvalidCredentialsError,
+    LoginAlreadyExistsError,
+    LoginOwnershipError,
+    get_user_storage,
+)
 
 
 @pytest.mark.asyncio
-async def test_full_authorization_and_profile_flow(monkeypatch: pytest.MonkeyPatch) -> None:
-    chat_id = 1001
-    user_id = 9001
-    username = "tester"
-
-    sent_messages: list[str] = []
-
-    class DummyMessage(SimpleNamespace):
-        message_id: int
-
-    async def fake_safe_send(bot, chat_id: int, text: str, reply_markup):  # type: ignore[override]
-        sent_messages.append(text)
-        return DummyMessage(message_id=len(sent_messages))
-
-    async def fake_safe_edit(bot, chat_id: int, message_id: int, text: str, inline_markup):  # type: ignore[override]
-        sent_messages.append(text)
-        return DummyMessage(message_id=message_id)
-
-    monkeypatch.setattr(menu, "safe_send", fake_safe_send)
-    monkeypatch.setattr(menu, "safe_edit", fake_safe_edit)
-
-    await session_storage.clear(chat_id)
-
-    user = await menu._ensure_user(tg_user_id=user_id, chat_id=chat_id, username=username)
-    assert user.is_registered is False
-    assert user.tg_bot_token_enc is None
-
-    await menu._render_auth(bot=None, chat_id=chat_id, user=user, nav_action="push")
-    session = await session_storage.get_session(chat_id)
-    assert session.pending_input == "auth:tg_bot"
-
-    user = await menu._save_token(
-        tg_user_id=user_id,
-        chat_id=chat_id,
-        username=username,
-        kind="tg_bot",
-        token="1234567890:TESTTOKENforAUTHFLOW123456789012345",
+async def test_registration_creates_profile() -> None:
+    settings = get_settings()
+    storage = get_user_storage()
+    user = await storage.register_user(
+        login="demo",
+        password="secret123",
+        tg_user_id=123,
+        tg_name="Tester",
+        chat_id=555,
     )
-    assert user.tg_bot_token_enc is not None
-    assert user.is_registered is False
-    await menu._render_auth(bot=None, chat_id=chat_id, user=user, nav_action="replace")
-    session = await session_storage.get_session(chat_id)
-    assert session.pending_input == "auth:wb_api"
+    profile_dir = settings.users_dir / "demo"
+    profile_path = profile_dir / "profile.json"
+    secrets_path = profile_dir / "secrets.json.enc"
+    assert profile_path.exists()
+    assert secrets_path.exists()
+    profile_data = json.loads(profile_path.read_text(encoding="utf-8"))
+    assert profile_data["company"] == "demo"
+    assert profile_data["tg_user_id"] == 123
+    assert profile_data["tg_name"] == "Tester"
+    secrets = decrypt_json(secrets_path.read_bytes())
+    assert secrets["password_hash"] != "secret123"
+    assert secrets["wb_api"] is None
+    assert user.profile.company == "demo"
 
-    user = await menu._save_token(
-        tg_user_id=user_id,
-        chat_id=chat_id,
-        username=username,
-        kind="wb_api",
-        token="A" * 64,
+
+@pytest.mark.asyncio
+async def test_duplicate_login_is_rejected() -> None:
+    storage = get_user_storage()
+    await storage.register_user(
+        login="unique",
+        password="secret123",
+        tg_user_id=1,
+        tg_name="First",
+        chat_id=42,
     )
-    assert user.wb_api_token_enc is not None
-    assert user.is_registered is False
+    with pytest.raises(LoginAlreadyExistsError):
+        await storage.register_user(
+            login="unique",
+            password="anotherpass",
+            tg_user_id=2,
+            tg_name="Second",
+            chat_id=24,
+        )
 
-    user = await menu._save_token(
-        tg_user_id=user_id,
-        chat_id=chat_id,
-        username=username,
-        kind="moysklad",
-        token="Basic dXNlcjpwYXNz",
+
+@pytest.mark.asyncio
+async def test_authentication_and_ownership() -> None:
+    storage = get_user_storage()
+    await storage.register_user(
+        login="owner",
+        password="password1",
+        tg_user_id=10,
+        tg_name="Owner",
+        chat_id=1,
     )
-    assert user.moysklad_api_token_enc is not None
-    assert user.is_registered is True
-    assert user.registered_at is not None
-
-    await menu._render_profile(bot=None, chat_id=chat_id, user=user, nav_action="replace")
-    session = await session_storage.get_session(chat_id)
-    assert session.pending_input is None
-    assert any("TG BOT" in text for text in sent_messages)
-
-    user = await menu._update_display_name(
-        tg_user_id=user_id,
-        chat_id=chat_id,
-        username=username,
-        display_name="Алексей",
+    user = await storage.authenticate_user(
+        login="owner",
+        password="password1",
+        tg_user_id=10,
+        tg_name="Owner",
+        chat_id=2,
     )
-    assert user.display_name == "Алексей"
+    assert user.profile.last_chat_id == 2
+    with pytest.raises(InvalidCredentialsError):
+        await storage.authenticate_user(
+            login="owner",
+            password="wrong",
+            tg_user_id=10,
+            tg_name="Owner",
+            chat_id=2,
+        )
+    with pytest.raises(LoginOwnershipError):
+        await storage.authenticate_user(
+            login="owner",
+            password="password1",
+            tg_user_id=11,
+            tg_name="Intruder",
+            chat_id=3,
+        )
 
-    user = await menu._update_company_name(
-        tg_user_id=user_id,
-        chat_id=chat_id,
-        username=username,
-        company_name="ООО Ромашка",
+
+@pytest.mark.asyncio
+async def test_save_avatar(tmp_path: Path) -> None:
+    storage = get_user_storage()
+    await storage.register_user(
+        login="avatar",
+        password="secret123",
+        tg_user_id=5,
+        tg_name="Avatar User",
+        chat_id=9,
     )
-    assert user.company_name == "ООО Ромашка"
+    image_path = tmp_path / "source.png"
+    Image.new("RGB", (400, 200), color="blue").save(image_path)
+    data = image_path.read_bytes()
+    prepared = _prepare_avatar(data)
+    user = await storage.save_avatar("avatar", prepared)
+    saved_path = get_settings().users_dir / "avatar" / "avatar.jpg"
+    assert saved_path.exists()
+    with Image.open(saved_path) as img:
+        assert img.size == (256, 256)
+    assert user.profile.avatar_filename == "avatar.jpg"
 
-    new_token = "9876543210:UPDATEDTOKENVALUEAAABBBCCC1234567890"
-    assert menu._validate_token("tg_bot", new_token)
-    user = await menu._save_token(
-        tg_user_id=user_id,
-        chat_id=chat_id,
-        username=username,
-        kind="tg_bot",
-        token=new_token,
+
+@pytest.mark.asyncio
+async def test_update_api_keys() -> None:
+    storage = get_user_storage()
+    await storage.register_user(
+        login="keys",
+        password="secret123",
+        tg_user_id=7,
+        tg_name="Key Owner",
+        chat_id=77,
     )
-    plain_token = menu._get_token_plain(user, "tg_bot")
-    assert plain_token == new_token
-    assert mask_secret(plain_token) == mask_secret(new_token)
-
-    invalid_token = "short"
-    assert menu._validate_token("wb_api", invalid_token) is False
+    await storage.update_wb_key("keys", "A" * 64)
+    await storage.update_ms_key("keys", "Basic ZGVtbzp0ZXN0")
+    secrets_path = get_settings().users_dir / "keys" / "secrets.json.enc"
+    secrets = decrypt_json(secrets_path.read_bytes())
+    assert secrets["wb_api"].startswith("A")
+    assert secrets["ms_api"].startswith("Basic")
