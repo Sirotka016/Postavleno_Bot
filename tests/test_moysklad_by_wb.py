@@ -28,30 +28,47 @@ class DummyResponse:
 
 
 class DummyAsyncClient:
-    def __init__(self, responses: dict[str, list[DummyResponse]]) -> None:
+    def __init__(self, responses: dict[str, list[DummyResponse]], *, delay: float = 0.0) -> None:
         self._responses = responses
         self.calls: list[dict[str, Any]] = []
+        self._delay = delay
+        self.max_parallel = 0
+        self._active = 0
         self._lock = asyncio.Lock()
 
-    async def __aenter__(self) -> DummyAsyncClient:
+    async def __aenter__(self) -> DummyAsyncClient:  # pragma: no cover - context helper
         return self
 
-    async def __aexit__(self, exc_type, exc, tb) -> None:  # pragma: no cover - required by context
+    async def __aexit__(self, exc_type, exc, tb) -> None:  # pragma: no cover - context helper
         return None
 
-    async def get(self, path: str, params: dict[str, Any] | None = None) -> DummyResponse:
+    async def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        **_: Any,
+    ) -> DummyResponse:
         if params is None:
             params = {}
+        filter_value = params.get("filter", "")
+        _, _, article = filter_value.partition("=")
+        queue = self._responses.setdefault(article, [])
+        if not queue:
+            raise AssertionError(f"Unexpected request for article {article}")
         async with self._lock:
+            self._active += 1
+            self.max_parallel = max(self.max_parallel, self._active)
+        try:
+            if self._delay:
+                await asyncio.sleep(self._delay)
+            response = queue.pop(0)
             self.calls.append({"path": path, "params": params.copy()})
-            if path == "/entity/assortment":
-                filter_value = params.get("filter", "")
-                _, _, article = filter_value.partition("=")
-                queue = self._responses.setdefault(article, [])
-                if not queue:
-                    raise AssertionError(f"Unexpected request for article {article}")
-                return queue.pop(0)
-            raise AssertionError(f"Unexpected path: {path}")
+            return response
+        finally:
+            async with self._lock:
+                self._active -= 1
 
 
 def test_norm_article() -> None:
@@ -60,7 +77,7 @@ def test_norm_article() -> None:
     assert norm_article("SKU\u00a0123") == "SKU 123"
 
 
-def test_fetch_quantities_for_articles_batches(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ms_fetch_batches(monkeypatch: pytest.MonkeyPatch) -> None:
     responses = {
         "A-1": [
             DummyResponse(
@@ -83,15 +100,16 @@ def test_fetch_quantities_for_articles_batches(monkeypatch: pytest.MonkeyPatch) 
             ),
         ],
     }
-    client = DummyAsyncClient(responses)
+    client = DummyAsyncClient(responses, delay=0.01)
 
-    def fake_client(**kwargs: Any) -> DummyAsyncClient:
-        return client
+    monkeypatch.setattr(moysklad, "create_ms_client", lambda **_: client)
 
-    monkeypatch.setattr(moysklad.httpx, "AsyncClient", fake_client)
-
-    settings = Settings(TELEGRAM_BOT_TOKEN="token", MOYSKLAD_TOKEN="secret")
-    wb_articles = {"A-1", "B-2", "C-3"}
+    settings = Settings(
+        TELEGRAM_BOT_TOKEN="token",
+        MOYSKLAD_TOKEN="secret",
+        MOYSKLAD_MAX_CONCURRENCY=2,
+    )
+    wb_articles = {"A-1", "B-2", "C-3", "A-1"}
 
     result = asyncio.run(fetch_quantities_for_articles(settings, wb_articles))
 
@@ -102,6 +120,7 @@ def test_fetch_quantities_for_articles_batches(monkeypatch: pytest.MonkeyPatch) 
     }
     requested_articles = sorted({call["params"]["filter"].split("=")[1] for call in client.calls})
     assert requested_articles == ["A-1", "B-2", "C-3"]
+    assert 1 < client.max_parallel <= settings.moysklad_max_concurrency
 
 
 def test_ms_by_wb_simple(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -118,12 +137,8 @@ def test_ms_by_wb_simple(monkeypatch: pytest.MonkeyPatch) -> None:
         ],
         "C-3": [DummyResponse({"rows": []})],
     }
-    client = DummyAsyncClient(responses)
-
-    def fake_client(**kwargs: Any) -> DummyAsyncClient:
-        return client
-
-    monkeypatch.setattr(moysklad.httpx, "AsyncClient", fake_client)
+    client = DummyAsyncClient(responses, delay=0.0)
+    monkeypatch.setattr(moysklad, "create_ms_client", lambda **_: client)
 
     settings = Settings(
         TELEGRAM_BOT_TOKEN="token",
@@ -158,7 +173,7 @@ def test_ms_by_wb_simple(monkeypatch: pytest.MonkeyPatch) -> None:
     assert filters == ["article=A-1", "article=B-2", "article=C-3"]
 
 
-def test_merge_ms_into_wb_keeps_shape() -> None:
+def test_store_merge_preserves_shape() -> None:
     wb_df = pd.DataFrame(
         {
             "Склад": ["WB-1", "WB-2"],
@@ -182,6 +197,7 @@ def test_merge_ms_into_wb_keeps_shape() -> None:
     assert list(merged["Склад"]) == ["FootballShop", "FootballShop"]
     assert list(merged["Кол-во"]) == [7, 8]
     assert list(merged["Артикул"]) == ["A-1", "B-2"]
+    assert list(merged["Цена"]) == [100, 200]
 
 
 def test_missing_article_keeps_wb_qty() -> None:

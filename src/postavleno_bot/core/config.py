@@ -54,6 +54,21 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("MOYSKLAD_QUANTITY_FIELD"),
         description="Какое поле использовать из ответов МойСклад при подсчёте остатков",
     )
+    moysklad_max_concurrency: int = Field(
+        6,
+        validation_alias=AliasChoices("MOYSKLAD_MAX_CONCURRENCY"),
+        description="Максимальное количество параллельных запросов к МойСклад",
+    )
+    moysklad_retry_attempts: int = Field(
+        4,
+        validation_alias=AliasChoices("MOYSKLAD_RETRY_ATTEMPTS"),
+        description="Количество попыток при ошибках и 429 от МойСклад",
+    )
+    moysklad_retry_base_delay: float = Field(
+        0.5,
+        validation_alias=AliasChoices("MOYSKLAD_RETRY_BASE_DELAY"),
+        description="Базовая задержка между повторами запросов к МойСклад",
+    )
     local_store_name: str = Field(
         "FootballShop",
         validation_alias=AliasChoices("LOCAL_STORE_NAME", "BRAND_STORE_NAME"),

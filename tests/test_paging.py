@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from postavleno_bot.handlers.menu import page_buttons
-from postavleno_bot.integrations.wb_client import WBStockItem
+from postavleno_bot.integrations.wildberries import WBStockItem
 from postavleno_bot.services.stocks import build_pages_grouped_by_warehouse
 
 

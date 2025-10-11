@@ -5,7 +5,7 @@ from datetime import datetime
 import pytest
 
 from postavleno_bot.handlers import menu
-from postavleno_bot.integrations.wb_client import WBAuthError, WBRatelimitError, WBStockItem
+from postavleno_bot.integrations.wildberries import WBAuthError, WBRatelimitError, WBStockItem
 from postavleno_bot.services.stocks import (
     WarehouseSummary,
     filter_by_warehouse,

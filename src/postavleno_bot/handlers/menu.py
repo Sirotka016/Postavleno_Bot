@@ -25,19 +25,20 @@ from structlog.stdlib import BoundLogger
 from ..core.config import get_settings
 from ..core.logging import get_logger
 from ..integrations.moysklad import fetch_quantities_for_articles, norm_article
-from ..integrations.wb_client import WBApiError, WBAuthError, WBRatelimitError, WBStockItem
-from ..services.export import save_dataframe_to_xlsx
+from ..integrations.wildberries import WBApiError, WBAuthError, WBRatelimitError, WBStockItem
 from ..services.stocks import (
     TELEGRAM_TEXT_LIMIT,
     PagedView,
     WarehouseSummary,
-    build_export_dataframe,
-    build_export_filename,
-    build_export_xlsx,
     build_pages_grouped_by_warehouse,
     format_single_warehouse,
     get_stock_data,
     summarize_by_warehouse,
+)
+from ..services.wb_export import (
+    build_export_dataframe,
+    build_export_filename,
+    build_export_xlsx,
 )
 from ..services.store_stock_merge import merge_ms_into_wb
 from ..state.session import (
@@ -48,6 +49,7 @@ from ..state.session import (
     nav_replace,
     session_storage,
 )
+from ..utils.excel import save_dataframe_to_xlsx
 from ..utils.safe_telegram import safe_delete, safe_edit, safe_send
 
 MENU_ROUTER = Router(name="menu")
@@ -198,6 +200,13 @@ def build_error_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="🚪 Выйти", callback_data=MAIN_EXIT_CALLBACK)],
         ]
     )
+
+
+def _normalize_sheet_name(raw_name: str | None) -> str:
+    base = (raw_name or "WB").strip() or "WB"
+    for char in "[]:*?/\\":
+        base = base.replace(char, "_")
+    return base[:31] or "WB"
 
 
 def build_warehouses_keyboard(
@@ -1412,7 +1421,8 @@ async def handle_stocks_export(
             view_label = current_view
             paged_view = build_pages_grouped_by_warehouse(selected_items)
 
-        file_bytes = build_export_xlsx(selected_items)
+        sheet_name = _normalize_sheet_name(settings.local_store_name)
+        file_bytes = build_export_xlsx(selected_items, sheet_name=sheet_name)
         filename = build_export_filename(view_label, warehouse_name, datetime.now())
         document = BufferedInputFile(file_bytes, filename)
 
@@ -1603,6 +1613,7 @@ async def handle_store_get(
                 ms_found=ms_found,
                 ms_missing=ms_missing,
                 quantity_field=settings.moysklad_quantity_field,
+                outcome="success",
             )
 
             merged = merge_ms_into_wb(
@@ -1624,10 +1635,7 @@ async def handle_store_get(
 
             exports_dir = Path("var/exports")
             timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-            sheet_name = (settings.local_store_name or "WB").strip() or "WB"
-            for char in "[]:*?/\\":
-                sheet_name = sheet_name.replace(char, "_")
-            sheet_name = sheet_name[:31] or "WB"
+            sheet_name = _normalize_sheet_name(settings.local_store_name)
             file_path = save_dataframe_to_xlsx(
                 merged,
                 path=exports_dir / f"ostatki_store_{timestamp}.xlsx",
@@ -1637,11 +1645,16 @@ async def handle_store_get(
                 "store.export.saved",
                 export_path=str(file_path),
                 rows_total=wb_rows,
+                outcome="success",
             )
 
             document = BufferedInputFile(file_path.read_bytes(), file_path.name)
             await bot.send_document(chat_id=chat_id, document=document)
-            logger.info("store.export.sent", filename=file_path.name)
+            logger.info(
+                "store.export.sent",
+                filename=file_path.name,
+                outcome="success",
+            )
 
             note = "✅ Готово! Отправил файл с остатками в чат."
             success = True

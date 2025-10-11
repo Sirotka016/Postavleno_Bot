@@ -4,10 +4,15 @@ import io
 from datetime import datetime
 
 import pandas as pd
+from openpyxl import load_workbook
 
-from postavleno_bot.integrations.wb_client import WBStockItem
-from postavleno_bot.services.export import dataframe_to_xlsx_bytes
-from postavleno_bot.services.stocks import build_export_filename, build_export_xlsx
+from postavleno_bot.integrations.wildberries import WBStockItem
+from postavleno_bot.services.wb_export import (
+    build_export_dataframe,
+    build_export_filename,
+    build_export_xlsx,
+)
+from postavleno_bot.utils.excel import dataframe_to_xlsx_bytes, save_dataframe_to_xlsx
 
 
 def _item(
@@ -45,7 +50,7 @@ def test_export_xlsx_headers() -> None:
         _item("Склад A", article="A", nm=1, quantity=7, price=1500, discount=5),
     ]
 
-    data = build_export_xlsx(items)
+    data = build_export_xlsx(items, sheet_name="FootballShop")
     df = pd.read_excel(io.BytesIO(data))
 
     assert list(df.columns) == [
@@ -91,3 +96,37 @@ def test_filename_all_vs_single() -> None:
         build_export_filename("wh", "Склад Москва", moment)
         == "wb_ostatki_Склад_Москва_20240102_1530.xlsx"
     )
+
+
+def test_export_dataframe_structure() -> None:
+    items = [
+        _item("Склад A", article="A", nm=1, quantity=5),
+        _item("Склад A", article="B", nm=2, quantity=3),
+    ]
+
+    frame = build_export_dataframe(items)
+
+    assert list(frame.columns) == [
+        "Склад",
+        "Артикул",
+        "nmId",
+        "Штрихкод",
+        "Кол-во",
+        "Категория",
+        "Предмет",
+        "Бренд",
+        "Размер",
+        "Цена",
+        "Скидка",
+    ]
+    assert frame.iloc[0]["Склад"] == "Склад A"
+
+
+def test_excel_xlsxwriter_opens(tmp_path) -> None:
+    frame = pd.DataFrame({"A": [1, 2], "B": ["x", "y"]})
+    path = save_dataframe_to_xlsx(frame, path=tmp_path / "sample.xlsx", sheet_name="Data")
+
+    workbook = load_workbook(path)
+    sheet = workbook["Data"]
+    values = list(sheet.iter_rows(min_row=2, max_row=3, values_only=True))
+    assert values == [(1, "x"), (2, "y")]
