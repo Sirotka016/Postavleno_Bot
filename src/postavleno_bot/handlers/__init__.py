@@ -6,10 +6,11 @@ from aiogram import Router
 
 from . import (
     auth_menu,
+    cb_help_ok,
+    cmd_help,
     company,
     email,
     fallback,
-    help,
     home,
     login,
     menu,
@@ -29,7 +30,8 @@ router.include_router(company.router)
 router.include_router(email.router)
 router.include_router(wb.router)
 router.include_router(menu.router)
-router.include_router(help.router)
+router.include_router(cmd_help.router)
+router.include_router(cb_help_ok.router)
 router.include_router(navigation.router)
 router.include_router(fallback.router)
 
