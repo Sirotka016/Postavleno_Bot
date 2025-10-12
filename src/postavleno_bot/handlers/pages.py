@@ -65,15 +65,9 @@ from ..ui.texts import (
     wb_prompt_text,
 )
 from ..utils.formatting import mask_token
+from ..start.ability_registry import ability_lines
 
-HOME_INVITE_TEMPLATE = (
-    "Привет, {tg_name}! ✨\n"
-    "Меня зовут Postavleno_Bot.\n\n"
-    "Что я умею:\n"
-    "• Выгружаю остатки Wildberries двумя способами:\n"
-    "  — «Остатки WB (Общие)» — одна строка на артикул, всё суммировано.\n"
-    "  — «Остатки WB (Склады)» — разрез по складам.\n"
-    "• Помогаю настроить профиль: Компания, Почта, ключ WB API.\n\n"
+HOME_BODY_TEMPLATE = (
     "Как начать:\n"
     "1) Нажмите «Профиль» и заполните:\n"
     "   — «Компания» — укажите название (можно изменить позже).\n"
@@ -150,7 +144,15 @@ async def render_home(
 ) -> int:
     await _apply_nav(state, nav_action, ScreenState(SCREEN_HOME))
     display_name = _resolve_home_name(profile, tg_user)
-    text = HOME_INVITE_TEMPLATE.format(tg_name=display_name)
+    header_lines = [
+        f"Привет, {display_name}! ✨",
+        "Меня зовут Postavleno_Bot.",
+        "",
+        "Что я умею:",
+        *ability_lines(),
+    ]
+    text_top = "\n".join(header_lines)
+    text = f"{text_top}\n\n{HOME_BODY_TEMPLATE}"
     if extra:
         text = f"{text}\n\n{extra}"
     keyboard = kb_home(is_authed)
