@@ -49,6 +49,7 @@ async def go_back(callback: CallbackQuery, state: FSMContext) -> None:
     previous = await nav_back(state)
     bot = callback.bot
     chat_id = callback.message.chat.id
+    tg_user = callback.from_user
     if not previous:
         profile = await load_active_profile(state)
         await render_home(
@@ -58,6 +59,7 @@ async def go_back(callback: CallbackQuery, state: FSMContext) -> None:
             nav_action="root",
             is_authed=profile is not None,
             profile=profile,
+            tg_user=tg_user,
         )
         return
 
@@ -71,6 +73,7 @@ async def go_back(callback: CallbackQuery, state: FSMContext) -> None:
             nav_action="root",
             is_authed=profile is not None,
             profile=profile,
+            tg_user=tg_user,
         )
     elif previous.name == SCREEN_AUTH_MENU:
         await render_require_auth(bot, state, chat_id, nav_action="replace")
@@ -123,6 +126,7 @@ async def go_back(callback: CallbackQuery, state: FSMContext) -> None:
             nav_action="replace",
             is_authed=profile is not None,
             profile=profile,
+            tg_user=tg_user,
         )
     else:
         await render_home(
@@ -132,4 +136,5 @@ async def go_back(callback: CallbackQuery, state: FSMContext) -> None:
             nav_action="root",
             is_authed=profile is not None,
             profile=profile,
+            tg_user=tg_user,
         )

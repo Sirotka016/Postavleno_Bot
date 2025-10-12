@@ -55,6 +55,7 @@ async def repeat_previous(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     previous = await nav_back(state)
     profile = await load_active_profile(state)
+    tg_user = callback.from_user
     if not previous:
         await render_home(
             callback.bot,
@@ -63,6 +64,7 @@ async def repeat_previous(callback: CallbackQuery, state: FSMContext) -> None:
             nav_action="root",
             is_authed=profile is not None,
             profile=profile,
+            tg_user=tg_user,
         )
         return
 
@@ -74,6 +76,7 @@ async def repeat_previous(callback: CallbackQuery, state: FSMContext) -> None:
             nav_action="root",
             is_authed=profile is not None,
             profile=profile,
+            tg_user=tg_user,
         )
     elif previous.name == SCREEN_AUTH_MENU:
         await render_require_auth(callback.bot, state, callback.message.chat.id, nav_action="replace")
@@ -114,6 +117,7 @@ async def repeat_previous(callback: CallbackQuery, state: FSMContext) -> None:
             nav_action="replace",
             is_authed=profile is not None,
             profile=profile,
+            tg_user=tg_user,
         )
     else:
         await render_home(
@@ -123,6 +127,7 @@ async def repeat_previous(callback: CallbackQuery, state: FSMContext) -> None:
             nav_action="root",
             is_authed=profile is not None,
             profile=profile,
+            tg_user=tg_user,
         )
 
 
@@ -140,4 +145,5 @@ async def exit_unknown(callback: CallbackQuery, state: FSMContext) -> None:
         nav_action="root",
         is_authed=profile is not None,
         profile=profile,
+        tg_user=callback.from_user,
     )

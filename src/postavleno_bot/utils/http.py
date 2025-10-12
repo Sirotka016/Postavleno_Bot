@@ -45,7 +45,7 @@ def create_ms_client(*, headers: dict[str, str] | None = None) -> httpx.AsyncCli
         "Accept": "application/json",
         "Content-Type": "application/json",
         "Accept-Encoding": "gzip",
-        "User-Agent": "Postavleno_Bot/1.0",
+        "User-Agent": "PostavlenoBot/1.0",
     }
     if headers:
         base_headers.update(headers)

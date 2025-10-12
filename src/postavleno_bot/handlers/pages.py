@@ -6,6 +6,7 @@ from datetime import datetime
 
 from aiogram import Bot
 from aiogram.fsm.context import FSMContext
+from aiogram.types import User
 
 from ..navigation import (
     SCREEN_AUTH_MENU,
@@ -55,17 +56,18 @@ GUEST_HOME_TEXT = (
 )
 
 AUTH_HOME_TEMPLATE = (
-    "Рада видеть вас, {name}! ✨\n\n"
+    "Рады видеть вас, {name}! ✨\n\n"
     "Интеграции:\n"
     "• WB API: {wb}\n"
-    "• МойСклад API: {ms}\n\n"
-    "Профиль поможет обновить данные и запустить экспорт."
+    "• МойСклад API: {ms}"
 )
 
 EXPORT_PROGRESS_TEXT = "Собираю данные…"
 EXPORT_READY_TEMPLATE = "Готово ✅"
 EXPORT_MISSING_TEMPLATE = "Добавьте ключи в профиле."
-EXPORT_ERROR_TEXT = "Не удалось собрать файл. Попробуйте чуть позже."
+EXPORT_ERROR_TEMPLATE = (
+    "Не получилось собрать файл 😕 Проверьте ключ {service} в профиле и попробуйте ещё раз."
+)
 
 REQUIRE_AUTH_TEXT = "Нужно авторизоваться. Выберите действие ниже."
 
@@ -82,7 +84,7 @@ EDIT_MS_TEXT = "🔑 Смена «Мой Склад» API\n\nОтправьте 
 EDIT_EMAIL_TEXT = "✉️ Смена почты\n\nСкоро появится подтверждение email."
 LOGIN_ERROR_TEXT = "Аккаунт не найден."
 REGISTER_TAKEN_TEXT = "Логин занят, придумайте другой."
-UNKNOWN_TEXT = "Не понял запрос 🤔 Выберите действие ниже."
+UNKNOWN_TEXT = "Не понял запрос 🤔"
 
 DELETE_CONFIRM_TEXT = (
     "Удалить аккаунт навсегда? Данные на диске будут стерты. Это действие нельзя отменить."
@@ -100,6 +102,19 @@ async def _apply_nav(state: FSMContext, action: str, screen: ScreenState) -> Non
         await nav_replace(state, screen)
 
 
+def _resolve_home_name(profile: AccountProfile | None, tg_user: User | None) -> str:
+    if tg_user:
+        first_name = (tg_user.first_name or "").strip()
+        if first_name:
+            return first_name
+        username = (tg_user.username or "").strip()
+        if username:
+            return username
+    if profile:
+        return profile.display_login
+    return "друг"
+
+
 async def render_home(
     bot: Bot,
     state: FSMContext,
@@ -108,6 +123,7 @@ async def render_home(
     nav_action: str = "root",
     is_authed: bool = False,
     profile: AccountProfile | None = None,
+    tg_user: User | None = None,
     extra: str | None = None,
 ) -> int:
     await _apply_nav(state, nav_action, ScreenState(SCREEN_HOME))
@@ -115,7 +131,7 @@ async def render_home(
         text = GUEST_HOME_TEXT
         keyboard = kb_home(False)
     else:
-        name = profile.company_name or profile.display_login
+        name = _resolve_home_name(profile, tg_user)
         text = AUTH_HOME_TEMPLATE.format(
             name=name,
             wb="✅" if profile.wb_api else "❌",
@@ -173,6 +189,10 @@ async def render_export_missing_token(
     )
 
 
+def _service_name_from_kind(kind: str) -> str:
+    return "МойСклад" if kind.startswith("ms") else "WB"
+
+
 async def render_export_error(
     bot: Bot,
     state: FSMContext,
@@ -186,13 +206,8 @@ async def render_export_error(
         nav_action,
         ScreenState(SCREEN_EXPORT_STATUS, {"kind": kind, "status": "error"}),
     )
-    return await card_manager.render(
-        bot,
-        chat_id,
-        EXPORT_ERROR_TEXT,
-        reply_markup=kb_export_error(),
-        state=state,
-    )
+    text = EXPORT_ERROR_TEMPLATE.format(service=_service_name_from_kind(kind))
+    return await card_manager.render(bot, chat_id, text, reply_markup=kb_export_error(), state=state)
 
 
 async def render_export_ready(
