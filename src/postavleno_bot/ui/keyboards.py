@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
+
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 
@@ -14,6 +16,7 @@ def _build(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
     )
 
 
+@lru_cache(maxsize=None)
 def kb_home(is_authed: bool) -> InlineKeyboardMarkup:
     if is_authed:
         rows = [
@@ -33,6 +36,7 @@ def kb_home(is_authed: bool) -> InlineKeyboardMarkup:
     return _build(rows)
 
 
+@lru_cache(maxsize=1)
 def kb_auth_menu() -> InlineKeyboardMarkup:
     return _build(
         [
@@ -43,6 +47,7 @@ def kb_auth_menu() -> InlineKeyboardMarkup:
     )
 
 
+@lru_cache(maxsize=1)
 def kb_login() -> InlineKeyboardMarkup:
     return _build(
         [
@@ -52,6 +57,7 @@ def kb_login() -> InlineKeyboardMarkup:
     )
 
 
+@lru_cache(maxsize=1)
 def kb_register() -> InlineKeyboardMarkup:
     return _build(
         [
@@ -61,12 +67,13 @@ def kb_register() -> InlineKeyboardMarkup:
     )
 
 
+@lru_cache(maxsize=1)
 def kb_profile() -> InlineKeyboardMarkup:
     return _build(
         [
             [("🏢 Компания", "profile.company")],
-            [("🔑 WB API", "profile.wb")],
             [("✉️ Почта", "profile.email")],
+            [("🔑 WB API", "profile.wb")],
             [("🚪 Выйти из профиля", "home.logout")],
             [("🗑️ Удалить аккаунт", "home.delete_open")],
             [("🔄 Обновить", "profile.refresh")],
@@ -76,6 +83,7 @@ def kb_profile() -> InlineKeyboardMarkup:
     )
 
 
+@lru_cache(maxsize=1)
 def kb_company_menu() -> InlineKeyboardMarkup:
     return _build(
         [
@@ -88,6 +96,7 @@ def kb_company_menu() -> InlineKeyboardMarkup:
     )
 
 
+@lru_cache(maxsize=1)
 def kb_company_delete_confirm() -> InlineKeyboardMarkup:
     return _build(
         [
@@ -97,6 +106,30 @@ def kb_company_delete_confirm() -> InlineKeyboardMarkup:
     )
 
 
+@lru_cache(maxsize=1)
+def kb_wb_menu() -> InlineKeyboardMarkup:
+    return _build(
+        [
+            [("✏️ Изменить WB API", "wb.edit")],
+            [("🗑️ Удалить WB API", "wb.delete")],
+            [("🔄 Обновить", "wb.refresh")],
+            [("◀️ Назад", "nav.back")],
+            [("✖️ Выйти", "home.exit")],
+        ]
+    )
+
+
+@lru_cache(maxsize=1)
+def kb_wb_delete_confirm() -> InlineKeyboardMarkup:
+    return _build(
+        [
+            [("Да", "wb.delete.confirm")],
+            [("Нет", "wb.delete.cancel")],
+        ]
+    )
+
+
+@lru_cache(maxsize=1)
 def kb_export_missing_token() -> InlineKeyboardMarkup:
     return _build(
         [
@@ -107,6 +140,7 @@ def kb_export_missing_token() -> InlineKeyboardMarkup:
     )
 
 
+@lru_cache(maxsize=1)
 def kb_export_error() -> InlineKeyboardMarkup:
     return _build(
         [
@@ -116,6 +150,7 @@ def kb_export_error() -> InlineKeyboardMarkup:
     )
 
 
+@lru_cache(maxsize=1)
 def kb_export_ready() -> InlineKeyboardMarkup:
     return _build(
         [
@@ -125,6 +160,7 @@ def kb_export_ready() -> InlineKeyboardMarkup:
     )
 
 
+@lru_cache(maxsize=1)
 def kb_delete_confirm() -> InlineKeyboardMarkup:
     return _build(
         [
@@ -134,6 +170,7 @@ def kb_delete_confirm() -> InlineKeyboardMarkup:
     )
 
 
+@lru_cache(maxsize=1)
 def kb_delete_error() -> InlineKeyboardMarkup:
     return _build(
         [
@@ -143,6 +180,7 @@ def kb_delete_error() -> InlineKeyboardMarkup:
     )
 
 
+@lru_cache(maxsize=1)
 def kb_edit_wb() -> InlineKeyboardMarkup:
     return _build(
         [
@@ -152,6 +190,7 @@ def kb_edit_wb() -> InlineKeyboardMarkup:
     )
 
 
+@lru_cache(maxsize=1)
 def kb_edit_company() -> InlineKeyboardMarkup:
     return _build(
         [
@@ -161,6 +200,7 @@ def kb_edit_company() -> InlineKeyboardMarkup:
     )
 
 
+@lru_cache(maxsize=1)
 def kb_email_menu() -> InlineKeyboardMarkup:
     return _build(
         [
@@ -173,6 +213,7 @@ def kb_email_menu() -> InlineKeyboardMarkup:
     )
 
 
+@lru_cache(maxsize=1)
 def kb_email_unlink_confirm() -> InlineKeyboardMarkup:
     return _build(
         [
@@ -182,6 +223,7 @@ def kb_email_unlink_confirm() -> InlineKeyboardMarkup:
     )
 
 
+@lru_cache(maxsize=1)
 def kb_edit_email() -> InlineKeyboardMarkup:
     return _build(
         [
@@ -191,6 +233,7 @@ def kb_edit_email() -> InlineKeyboardMarkup:
     )
 
 
+@lru_cache(maxsize=1)
 def kb_unknown() -> InlineKeyboardMarkup:
     return _build(
         [
@@ -200,6 +243,7 @@ def kb_unknown() -> InlineKeyboardMarkup:
     )
 
 
+@lru_cache(maxsize=1)
 def kb_retry_login() -> InlineKeyboardMarkup:
     return _build(
         [
@@ -209,6 +253,7 @@ def kb_retry_login() -> InlineKeyboardMarkup:
     )
 
 
+@lru_cache(maxsize=1)
 def kb_retry_register() -> InlineKeyboardMarkup:
     return _build(
         [
@@ -224,12 +269,20 @@ __all__ = [
     "kb_login",
     "kb_register",
     "kb_profile",
+    "kb_company_menu",
+    "kb_company_delete_confirm",
+    "kb_wb_menu",
+    "kb_wb_delete_confirm",
     "kb_export_missing_token",
     "kb_export_error",
     "kb_export_ready",
+    "kb_delete_confirm",
+    "kb_delete_error",
     "kb_edit_wb",
     "kb_edit_company",
     "kb_edit_email",
+    "kb_email_menu",
+    "kb_email_unlink_confirm",
     "kb_unknown",
     "kb_retry_login",
     "kb_retry_register",

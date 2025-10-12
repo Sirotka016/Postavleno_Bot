@@ -49,18 +49,30 @@ from ..ui import (
     kb_retry_login,
     kb_retry_register,
     kb_unknown,
+    kb_wb_delete_confirm,
+    kb_wb_menu,
 )
 
-GUEST_HOME_TEXT = (
-    "Привет! Я Postavleno_Bot 👋\n"
-    "Помогаю работать с Wildberries.\n\n"
-    "Чтобы продолжить, выберите действие ниже."
-)
-
-AUTH_HOME_TEMPLATE = (
-    "Привет, {tg_login}! ✨\n\n"
-    "Интеграции:\n"
-    "• WB API: {wb}"
+HOME_INVITE_TEMPLATE = (
+    "Привет, {tg_name}! ✨\n"
+    "Меня зовут Postavleno_Bot.\n\n"
+    "Что я умею:\n"
+    "• Выгружаю остатки Wildberries двумя способами:\n"
+    "  — «Остатки WB (Общие)» — одна строка на артикул, всё суммировано.\n"
+    "  — «Остатки WB (Склады)» — разрез по складам.\n"
+    "• Помогаю настроить профиль: Компания, Почта, ключ WB API.\n\n"
+    "Как начать:\n"
+    "1) Нажмите «Профиль» и заполните:\n"
+    "   — «Компания» — укажите название (можно изменить позже).\n"
+    "   — «Почта» — привяжите и подтвердите email (на него придёт код).\n"
+    "   — «WB API» — добавьте ключ из кабинета WB (Доступ к API).\n"
+    "2) Вернитесь на главное окно и выберите нужную выгрузку.\n"
+    "3) «Обновить» — перезапрос данных и актуализация статусов.\n"
+    "4) «Выйти» — завершить сессию.\n\n"
+    "Подсказки:\n"
+    "• Зелёная галочка ✅ — всё подключено; красный крестик ❌ — нужно настроить.\n"
+    "• Файлы выгружаются в XLSX и отправляются в чат.\n"
+    "Удачной работы! 🚀"
 )
 
 PROFILE_HINT = "Профиль поможет обновить данные и запустить экспорт."
@@ -82,7 +94,7 @@ REGISTER_TEXT = (
 )
 REGISTER_PASSWORD_TEXT = "🆕 Регистрация\n\nЛогин принят. Введите пароль (≥ 6 символов)."
 COMPANY_REQUEST_TEXT = (
-    "Давайте укажем название вашей компании. Отправьте одно сообщением название (до 70 символов)."
+    "Укажите название вашей компании одним сообщением (до 70 символов). Его всегда можно изменить."
 )
 COMPANY_RENAME_TEXT = (
     "✏️ Переименовать компанию\n\n"
@@ -93,9 +105,16 @@ COMPANY_MENU_TEMPLATE = (
     "Текущее название: {company}"
 )
 COMPANY_DELETE_CONFIRM_TEXT = "Вы уверены? Да/Нет"
+WB_MENU_TEXT = (
+    "🔑 WB API\n\n"
+    "Ключ подключён. Можно изменить или удалить."
+)
+
+WB_DELETE_CONFIRM_TEXT = "Удалить ключ WB API? Действие необратимо."
+
 EDIT_WB_TEXT = (
     "🔑 WB API\n\n"
-    "Отправьте ваш WB API ключ одним сообщением. Его можно сгенерировать в кабинете WB."
+    "Отправьте ключ WB API одним сообщением. Его можно сгенерировать в кабинете WB (Доступ к API)."
 )
 EMAIL_REQUEST_TEXT = (
     "✉️ Почта\n\n"
@@ -156,24 +175,11 @@ async def render_home(
     extra: str | None = None,
 ) -> int:
     await _apply_nav(state, nav_action, ScreenState(SCREEN_HOME))
-    if not is_authed or profile is None:
-        text = "".join(GUEST_HOME_TEXT)
-        keyboard = kb_home(False)
-    else:
-        name = _resolve_home_name(profile, tg_user)
-        text = "".join(
-            [
-                AUTH_HOME_TEMPLATE.format(
-                    tg_login=name,
-                    wb="✅" if profile.wb_api else "❌",
-                ),
-                "\n\n",
-                PROFILE_HINT,
-            ]
-        )
-        if extra:
-            text = f"{text}\n\n{extra}"
-        keyboard = kb_home(True)
+    display_name = _resolve_home_name(profile, tg_user)
+    text = HOME_INVITE_TEMPLATE.format(tg_name=display_name)
+    if extra:
+        text = f"{text}\n\n{extra}"
+    keyboard = kb_home(is_authed)
     return await card_manager.render(bot, chat_id, text, reply_markup=keyboard, state=state)
 
 
@@ -468,9 +474,57 @@ async def render_edit_wb(
     nav_action: str = "push",
     prompt: str | None = None,
 ) -> int:
-    await _apply_nav(state, nav_action, ScreenState(SCREEN_EDIT_WB))
+    await _apply_nav(
+        state,
+        nav_action,
+        ScreenState(SCREEN_EDIT_WB, {"mode": "prompt"}),
+    )
     text = EDIT_WB_TEXT if not prompt else f"{EDIT_WB_TEXT}\n\n{prompt}"
     return await card_manager.render(bot, chat_id, text, reply_markup=kb_edit_wb(), state=state)
+
+
+async def render_wb_menu(
+    bot: Bot,
+    state: FSMContext,
+    chat_id: int,
+    *,
+    nav_action: str = "push",
+) -> int:
+    await _apply_nav(
+        state,
+        nav_action,
+        ScreenState(SCREEN_EDIT_WB, {"mode": "menu"}),
+    )
+    return await card_manager.render(
+        bot,
+        chat_id,
+        WB_MENU_TEXT,
+        reply_markup=kb_wb_menu(),
+        state=state,
+    )
+
+
+async def render_wb_delete_confirm(
+    bot: Bot,
+    state: FSMContext,
+    chat_id: int,
+    *,
+    nav_action: str = "push",
+    prompt: str | None = None,
+) -> int:
+    await _apply_nav(
+        state,
+        nav_action,
+        ScreenState(SCREEN_EDIT_WB, {"mode": "delete"}),
+    )
+    base = WB_DELETE_CONFIRM_TEXT if not prompt else f"{WB_DELETE_CONFIRM_TEXT}\n\n{prompt}"
+    return await card_manager.render(
+        bot,
+        chat_id,
+        base,
+        reply_markup=kb_wb_delete_confirm(),
+        state=state,
+    )
 
 
 async def render_company_delete_confirm(

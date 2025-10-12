@@ -19,6 +19,8 @@ from .pages import (
     render_email_unlink_confirm,
     render_profile,
     render_require_auth,
+    render_wb_delete_confirm,
+    render_wb_menu,
 )
 from .utils import delete_user_message, load_active_profile
 
@@ -174,8 +176,102 @@ async def edit_wb(callback: CallbackQuery, state: FSMContext) -> None:
     if not profile:
         await render_require_auth(callback.bot, state, callback.message.chat.id, nav_action="replace")
         return
+    await state.set_state(None)
+    token = (profile.wb_api or "").strip()
+    if not token:
+        await state.set_state(EditWBState.await_token)
+        await render_edit_wb(callback.bot, state, callback.message.chat.id, nav_action="push")
+        return
+    await render_wb_menu(callback.bot, state, callback.message.chat.id, nav_action="push")
+
+
+@router.callback_query(F.data == "wb.refresh")
+async def refresh_wb(callback: CallbackQuery, state: FSMContext) -> None:
+    if callback.message is None:
+        return
+    await callback.answer()
+    profile = await load_active_profile(state)
+    if not profile:
+        await render_require_auth(callback.bot, state, callback.message.chat.id, nav_action="replace")
+        return
+    token = (profile.wb_api or "").strip()
+    if not token:
+        await state.set_state(EditWBState.await_token)
+        await render_edit_wb(callback.bot, state, callback.message.chat.id, nav_action="replace")
+        return
+    await state.set_state(None)
+    await render_wb_menu(callback.bot, state, callback.message.chat.id, nav_action="replace")
+
+
+@router.callback_query(F.data == "wb.edit")
+async def change_wb(callback: CallbackQuery, state: FSMContext) -> None:
+    if callback.message is None:
+        return
+    await callback.answer()
+    profile = await load_active_profile(state)
+    if not profile:
+        await render_require_auth(callback.bot, state, callback.message.chat.id, nav_action="replace")
+        return
     await state.set_state(EditWBState.await_token)
-    await render_edit_wb(callback.bot, state, callback.message.chat.id, nav_action="push")
+    await render_edit_wb(callback.bot, state, callback.message.chat.id, nav_action="replace")
+
+
+@router.callback_query(F.data == "wb.delete")
+async def delete_wb_prompt(callback: CallbackQuery, state: FSMContext) -> None:
+    if callback.message is None:
+        return
+    await callback.answer()
+    profile = await load_active_profile(state)
+    if not profile:
+        await render_require_auth(callback.bot, state, callback.message.chat.id, nav_action="replace")
+        return
+    token = (profile.wb_api or "").strip()
+    if not token:
+        await state.set_state(EditWBState.await_token)
+        await render_edit_wb(callback.bot, state, callback.message.chat.id, nav_action="replace")
+        return
+    await state.set_state(None)
+    await render_wb_delete_confirm(callback.bot, state, callback.message.chat.id, nav_action="replace")
+
+
+@router.callback_query(F.data == "wb.delete.cancel")
+async def cancel_delete_wb(callback: CallbackQuery, state: FSMContext) -> None:
+    if callback.message is None:
+        return
+    await callback.answer()
+    profile = await load_active_profile(state)
+    if not profile:
+        await render_require_auth(callback.bot, state, callback.message.chat.id, nav_action="replace")
+        return
+    token = (profile.wb_api or "").strip()
+    if not token:
+        await state.set_state(EditWBState.await_token)
+        await render_edit_wb(callback.bot, state, callback.message.chat.id, nav_action="replace")
+        return
+    await state.set_state(None)
+    await render_wb_menu(callback.bot, state, callback.message.chat.id, nav_action="replace")
+
+
+@router.callback_query(F.data == "wb.delete.confirm")
+async def confirm_delete_wb(callback: CallbackQuery, state: FSMContext) -> None:
+    if callback.message is None:
+        return
+    await callback.answer()
+    profile = await load_active_profile(state)
+    if not profile:
+        await render_require_auth(callback.bot, state, callback.message.chat.id, nav_action="replace")
+        return
+    repo = get_accounts_repo()
+    updated = repo.set_wb_api(profile.username, None)
+    await state.set_state(None)
+    await render_profile(
+        callback.bot,
+        state,
+        callback.message.chat.id,
+        updated,
+        nav_action="replace",
+        extra="Ключ WB удалён ✅",
+    )
 
 
 @router.callback_query(F.data == "profile.email")

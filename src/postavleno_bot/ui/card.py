@@ -34,6 +34,7 @@ class CardManager:
                     text=text,
                     reply_markup=reply_markup,
                     disable_web_page_preview=True,
+                    parse_mode=None,
                 )
                 new_id = message.message_id if hasattr(message, "message_id") else message_id
                 self._message_ids[chat_id] = new_id
@@ -49,6 +50,7 @@ class CardManager:
             text,
             reply_markup=reply_markup,
             disable_web_page_preview=True,
+            parse_mode=None,
         )
         new_id = message.message_id
         self._message_ids[chat_id] = new_id
