@@ -25,6 +25,14 @@ def _log_error_response(response: httpx.Response) -> None:
     )
 
 
+COMMON_MS_HEADERS = {
+    "Accept": "application/json",
+    "Content-Type": "application/json",
+    "Accept-Encoding": "gzip",
+    "User-Agent": "PostavlenoBot/1.0",
+}
+
+
 async def _perform_request(
     client: httpx.AsyncClient,
     *,
@@ -38,33 +46,38 @@ async def _perform_request(
         logger_name="integrations.ms",
         params={"include": "zeroLines"},
         auth=auth,
-        headers=headers,
+        headers=headers or COMMON_MS_HEADERS,
     )
 
 
 async def fetch_ms_stocks_all(token: str) -> dict[str, Any]:
     """Fetch the current stock report from MoySklad with auth fallbacks."""
 
-    async with create_ms_client() as client:
+    async with create_ms_client(headers=COMMON_MS_HEADERS) as client:
         basic_auth = httpx.BasicAuth(token, "")
         try:
-            response = await _perform_request(client, auth=basic_auth)
+            response = await _perform_request(
+                client,
+                auth=basic_auth,
+                headers=COMMON_MS_HEADERS,
+            )
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code != httpx.codes.UNAUTHORIZED:
                 _log_error_response(exc.response)
                 raise
-            # Retry with Bearer token header as a fallback scenario.
-            bearer_headers = {"Authorization": f"Bearer {token}"}
-            try:
-                response = await _perform_request(client, headers=bearer_headers)
-            except httpx.HTTPStatusError as bearer_exc:
-                _log_error_response(bearer_exc.response)
-                raise
+        else:
+            payload = response.json()
+            return dict(payload) if isinstance(payload, Mapping) else {}
+
+        bearer_headers = {**COMMON_MS_HEADERS, "Authorization": f"Bearer {token}"}
+        try:
+            response = await _perform_request(client, headers=bearer_headers)
+        except httpx.HTTPStatusError as exc:
+            _log_error_response(exc.response)
+            raise
 
         payload = response.json()
-        if isinstance(payload, Mapping):
-            return dict(payload)
-        return {}
+        return dict(payload) if isinstance(payload, Mapping) else {}
 
 
 __all__ = ["fetch_ms_stocks_all"]

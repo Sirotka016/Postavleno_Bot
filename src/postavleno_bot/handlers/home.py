@@ -5,7 +5,7 @@ from __future__ import annotations
 from aiogram import F, Router
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, User
 
 from ..core.logging import get_logger
 from ..navigation import SCREEN_AUTH_MENU, SCREEN_PROFILE, current_screen
@@ -27,6 +27,12 @@ app_logger = get_logger(__name__).bind(handler="home")
 audit_logger = get_logger("audit").bind(action="account_delete")
 
 
+def _source_user(source: Message | CallbackQuery) -> User | None:
+    if isinstance(source, Message):
+        return source.from_user
+    return source.from_user
+
+
 async def _render_home(
     source: Message | CallbackQuery, state: FSMContext, chat_id: int, *, nav_action: str = "root"
 ) -> None:
@@ -39,6 +45,7 @@ async def _render_home(
         nav_action=nav_action,
         is_authed=profile is not None,
         profile=profile,
+        tg_user=_source_user(source),
     )
 
 
@@ -119,6 +126,7 @@ async def handle_delete_cancel(callback: CallbackQuery, state: FSMContext) -> No
         nav_action="replace",
         is_authed=True,
         profile=profile,
+        tg_user=_source_user(callback),
     )
 
 
@@ -162,6 +170,7 @@ async def handle_delete_confirm(callback: CallbackQuery, state: FSMContext) -> N
         nav_action="root",
         is_authed=False,
         profile=None,
+        tg_user=_source_user(callback),
     )
 
 

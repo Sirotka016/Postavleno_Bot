@@ -18,7 +18,9 @@ def kb_home(is_authed: bool) -> InlineKeyboardMarkup:
     if is_authed:
         rows = [
             [("👤 Профиль", "home.profile")],
-            [("🚪 Выйти из профиля", "home.logout")],
+            [("📊 Остатки WB (Общие)", "stocks_wb_all")],
+            [("🏷️ Остатки WB (Склады)", "stocks_wb_bywh")],
+            [("📘 Остатки Мой Склад", "stocks_ms_all")],
             [("🔄 Обновить", "home.refresh")],
             [("✖️ Выйти", "home.exit")],
         ]
@@ -68,8 +70,8 @@ def kb_profile() -> InlineKeyboardMarkup:
             [("🔑 Сменить «Мой Склад» API", "profile.ms")],
             [("✉️ Сменить почту (скоро)", "profile.email")],
             [("📊 Остатки WB (Общие)", "stocks_wb_all")],
-            [("🏷️ Остатки WB (По складам)", "stocks_wb_bywh")],
-            [("📘 Остатки МойСклад (Общие)", "stocks_ms_all")],
+            [("🏷️ Остатки WB (Склады)", "stocks_wb_bywh")],
+            [("📘 Остатки Мой Склад", "stocks_ms_all")],
             [("🗑️ Удалить аккаунт", "home.delete_open")],
             [("🔄 Обновить", "profile.refresh")],
             [("◀️ Назад", "nav.back")],
@@ -164,8 +166,8 @@ def kb_edit_email() -> InlineKeyboardMarkup:
 def kb_unknown() -> InlineKeyboardMarkup:
     return _build(
         [
-            [("Повторить", "unknown.repeat")],
-            [("Выйти", "unknown.exit")],
+            [("🔁 Повторить", "unknown.repeat")],
+            [("✖️ Выйти", "unknown.exit")],
         ]
     )
 
