@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
+import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import bcrypt
-import shutil
 
 from ..core.logging import get_logger
 from ..domain.validators import validate_login
