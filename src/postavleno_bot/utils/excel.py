@@ -110,15 +110,14 @@ def wb_to_df_all(items: list[dict[str, object]]) -> pd.DataFrame:
             ]
         )
     df["barcode"] = _clean_str_series(df["barcode"])
-    df["nmId"] = pd.to_numeric(df["nmId"], errors="coerce")
+    df["nmId"] = pd.to_numeric(df["nmId"], errors="coerce").astype("Int64")
 
     for numeric in ["quantity", "inWayToClient", "inWayFromClient", "quantityFull"]:
         df[numeric] = pd.to_numeric(df[numeric], errors="coerce").fillna(0)
 
     aggregation = (
-        df.groupby("supplierArticle")
+        df.groupby(["supplierArticle", "nmId"], dropna=False)
         .agg(
-            nmId=("nmId", lambda s: _most_common(s)),
             barcode=("barcode", _first_nonempty),
             quantity=("quantity", "sum"),
             inWayToClient=("inWayToClient", "sum"),
@@ -150,9 +149,10 @@ def wb_to_df_all(items: list[dict[str, object]]) -> pd.DataFrame:
         "Итого",
     ]
     aggregation = aggregation[ordered_columns]
+    aggregation["nmId"] = aggregation["nmId"].astype("Int64")
     for column in ["Кол-во", "В пути к клиенту", "Возврат от клиента", "Итого"]:
         aggregation[column] = aggregation[column].round().astype("int64")
-    return aggregation.sort_values("Артикул поставщика", kind="stable").reset_index(drop=True)
+    return aggregation.sort_values(["Артикул поставщика", "nmId"], kind="stable").reset_index(drop=True)
 
 
 def wb_to_df_bywh(items: list[dict[str, object]]) -> pd.DataFrame:

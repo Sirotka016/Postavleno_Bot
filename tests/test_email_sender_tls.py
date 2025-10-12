@@ -18,10 +18,19 @@ from postavleno_bot.utils import email_sender
 class SMTPStub:
     instances: list["SMTPStub"] = []
 
-    def __init__(self, *, hostname: str, port: int, use_tls: bool = False, timeout: int | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        hostname: str,
+        port: int,
+        use_tls: bool = False,
+        start_tls: bool | None = None,
+        timeout: int | None = None,
+    ) -> None:
         self.hostname = hostname
         self.port = port
         self.use_tls = use_tls
+        self.start_tls = start_tls
         self.timeout = timeout
         self.connected = False
         self.starttls_calls = 0
@@ -67,6 +76,7 @@ def test_send_email_uses_starttls_for_587(monkeypatch: pytest.MonkeyPatch) -> No
     instance = SMTPStub.instances[0]
     assert instance.port == 587
     assert instance.use_tls is False
+    assert instance.start_tls is False
     assert instance.connected
     assert instance.starttls_calls == 1
     assert instance.login_calls == [("user@example.com", "secret")]

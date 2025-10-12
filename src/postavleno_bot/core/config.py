@@ -51,6 +51,11 @@ class Settings(BaseSettings):
         description="Имя отправителя в письмах",
         validation_alias=AliasChoices("SMTP_SENDER"),
     )
+    cache_ttl_seconds: int = Field(
+        60,
+        description="TTL кэша для обращений к внешним API",
+        validation_alias=AliasChoices("CACHE_TTL_SECONDS"),
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",

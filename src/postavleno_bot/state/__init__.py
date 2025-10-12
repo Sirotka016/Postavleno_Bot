@@ -1,11 +1,11 @@
 """FSM state definitions."""
 
-from .forms import EditCompanyState, EditEmailState, EditWBState, LoginStates, RegisterStates
+from .forms import CompanyStates, EmailStates, LoginStates, RegisterStates, WbStates
 
 __all__ = [
-    "EditCompanyState",
-    "EditEmailState",
-    "EditWBState",
+    "CompanyStates",
+    "EmailStates",
     "LoginStates",
     "RegisterStates",
+    "WbStates",
 ]

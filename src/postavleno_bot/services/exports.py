@@ -1,13 +1,16 @@
-"""Services for preparing stock export files."""
+"""Export helpers for preparing XLSX reports."""
 
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
-from typing import Any
+from typing import Any, Callable
+
+import pandas as pd
 
 from ..core.config import get_settings
 from ..core.logging import get_logger
@@ -15,6 +18,13 @@ from ..utils.excel import save_df_xlsx, wb_to_df_all, wb_to_df_bywh
 from .wb_cache import load_wb_rows
 
 _logger = get_logger("stocks.export")
+
+_DF_CACHE: dict[tuple[str, str], tuple[float, pd.DataFrame]] = {}
+
+
+def _cache_ttl() -> int:
+    value = getattr(get_settings(), "cache_ttl_seconds", 60)
+    return max(5, int(value or 0))
 
 
 def _log_stage(stage: str, start: float, **fields: Any) -> None:
@@ -45,18 +55,60 @@ def _format_filename(prefix: str, created_at: datetime) -> str:
     return f"{prefix}_{created_at.strftime('%Y%m%d_%H%M')}.xlsx"
 
 
-async def export_wb_stocks_all(login: str, wb_token: str) -> ExportResult:
+async def _build_dataframe(
+    *,
+    login: str,
+    token: str,
+    mode: str,
+    bypass_cache: bool,
+    builder: Callable[[list[dict[str, Any]]], pd.DataFrame],
+) -> pd.DataFrame:
+    cache_key = (token, mode)
+    ttl = _cache_ttl()
+    now = time.monotonic()
+
+    if not bypass_cache:
+        cached = _DF_CACHE.get(cache_key)
+        if cached and now - cached[0] < ttl:
+            df = cached[1]
+            _logger.info("export.cache_hit", kind=mode, rows=int(getattr(df, "shape", (0,))[0]))
+            return df.copy()
+
+    fetch_start = perf_counter()
+    rows = await load_wb_rows(login, token, bypass_cache=bypass_cache)
+    _log_stage(
+        "fetch",
+        fetch_start,
+        records_count=len(rows),
+        kind=mode,
+        cache="bypass" if bypass_cache else "miss",
+    )
+
+    transform_start = perf_counter()
+    df = await asyncio.to_thread(builder, rows)
+    _log_stage("transform", transform_start, records_count=len(df), kind=mode)
+
+    _DF_CACHE[cache_key] = (time.monotonic(), df)
+    return df.copy()
+
+
+async def export_wb_stocks_all(
+    login: str,
+    wb_token: str,
+    *,
+    bypass_cache: bool = False,
+) -> ExportResult:
     created_at = _timestamp()
     prefix = "wb_ostatki_ALL"
     file_path = _exports_dir(login) / _format_filename(prefix, created_at)
 
-    fetch_start = perf_counter()
-    rows = await load_wb_rows(login, wb_token)
-    _log_stage("fetch", fetch_start, records_count=len(rows), kind="wb_all")
-
-    transform_start = perf_counter()
-    df = await asyncio.to_thread(wb_to_df_all, rows)
-    _log_stage("transform", transform_start, records_count=len(df), kind="wb_all")
+    df = await _build_dataframe(
+        login=login,
+        token=wb_token,
+        mode="wb_all",
+        bypass_cache=bypass_cache,
+        builder=wb_to_df_all,
+    )
 
     write_start = perf_counter()
     await asyncio.to_thread(save_df_xlsx, df, file_path)
@@ -69,22 +121,28 @@ async def export_wb_stocks_all(login: str, wb_token: str) -> ExportResult:
         rows=result.rows,
         file=str(file_path),
         outcome="success",
+        cache_bypass=bypass_cache,
     )
     return result
 
 
-async def export_wb_stocks_by_warehouse(login: str, wb_token: str) -> ExportResult:
+async def export_wb_stocks_by_warehouse(
+    login: str,
+    wb_token: str,
+    *,
+    bypass_cache: bool = False,
+) -> ExportResult:
     created_at = _timestamp()
     prefix = "wb_ostatki_BY_WAREHOUSE"
     file_path = _exports_dir(login) / _format_filename(prefix, created_at)
 
-    fetch_start = perf_counter()
-    rows = await load_wb_rows(login, wb_token)
-    _log_stage("fetch", fetch_start, records_count=len(rows), kind="wb_by_wh")
-
-    transform_start = perf_counter()
-    df = await asyncio.to_thread(wb_to_df_bywh, rows)
-    _log_stage("transform", transform_start, records_count=len(df), kind="wb_by_wh")
+    df = await _build_dataframe(
+        login=login,
+        token=wb_token,
+        mode="wb_by_wh",
+        bypass_cache=bypass_cache,
+        builder=wb_to_df_bywh,
+    )
 
     write_start = perf_counter()
     await asyncio.to_thread(save_df_xlsx, df, file_path)
@@ -104,6 +162,7 @@ async def export_wb_stocks_by_warehouse(login: str, wb_token: str) -> ExportResu
         file=str(file_path),
         warehouses=warehouses,
         outcome="success",
+        cache_bypass=bypass_cache,
     )
     return result
 
