@@ -6,8 +6,6 @@ from pathlib import Path
 from typing import Iterable
 
 import pandas as pd
-from openpyxl.styles import Font
-from openpyxl.utils import get_column_letter
 
 
 def save_df_xlsx(df: pd.DataFrame, path: Path) -> Path:
@@ -15,20 +13,21 @@ def save_df_xlsx(df: pd.DataFrame, path: Path) -> Path:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     sheet_name = "Остатки"
-    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+    engine_kwargs = {"options": {"strings_to_numbers": True}}
+    with pd.ExcelWriter(path, engine="xlsxwriter", engine_kwargs=engine_kwargs) as writer:
         df.to_excel(writer, sheet_name=sheet_name, index=False)
+        workbook = writer.book
         worksheet = writer.sheets[sheet_name]
-        worksheet.freeze_panes = "A2"
-        header_font = Font(bold=True)
-        for cell in worksheet[1]:
-            cell.font = header_font
-        for idx, column_cells in enumerate(worksheet.columns, start=1):
-            column_letter = get_column_letter(idx)
-            max_length = 0
-            for cell in column_cells:
-                value = "" if cell.value is None else str(cell.value)
-                max_length = max(max_length, len(value))
-            worksheet.column_dimensions[column_letter].width = min(max_length + 2, 80)
+        header_format = workbook.add_format({"bold": True})
+        worksheet.freeze_panes(1, 0)
+        worksheet.set_row(0, None, header_format)
+        for idx, column in enumerate(df.columns):
+            if df.empty:
+                max_length = len(str(column))
+            else:
+                series = df[column].astype(str)
+                max_length = max(series.map(len).max(), len(str(column)))
+            worksheet.set_column(idx, idx, min(max_length + 2, 80))
     return path
 
 
@@ -151,6 +150,8 @@ def wb_to_df_all(items: list[dict[str, object]]) -> pd.DataFrame:
         "Итого",
     ]
     aggregation = aggregation[ordered_columns]
+    for column in ["Кол-во", "В пути к клиенту", "Возврат от клиента", "Итого"]:
+        aggregation[column] = aggregation[column].round().astype("int64")
     return aggregation.sort_values("Артикул поставщика", kind="stable").reset_index(drop=True)
 
 

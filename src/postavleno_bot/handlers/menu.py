@@ -55,7 +55,7 @@ async def _handle_export(
     if callback.message is None:
         return
 
-    await callback.answer()
+    await callback.answer("Готовлю файл…")
     await state.set_state(None)
 
     profile = await load_active_profile(state)

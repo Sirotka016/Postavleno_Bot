@@ -22,8 +22,8 @@ def test_profile_menu_structure() -> None:
     texts = extract_texts(kb_profile())
     assert texts == [
         "🏢 Компания",
-        "🔑 WB API",
         "✉️ Почта",
+        "🔑 WB API",
         "🚪 Выйти из профиля",
         "🗑️ Удалить аккаунт",
         "🔄 Обновить",

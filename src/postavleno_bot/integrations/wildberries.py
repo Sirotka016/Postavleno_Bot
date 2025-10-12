@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
+import orjson
+
 from ..core.logging import get_logger
-from ..utils.http import create_wb_client, request_with_retry
+from ..utils.http import get_wb_client, request_with_retry
 
 _WB_LOGGER = get_logger("integrations.wb")
 
@@ -55,47 +58,66 @@ class WBStockItem:
                 continue
         return 0.0
 
+    @property
+    def last_change_at(self) -> datetime | None:
+        raw = self.payload.get("lastChangeDate")
+        if raw is None:
+            return None
+        text = str(raw).strip()
+        if not text:
+            return None
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        try:
+            dt = datetime.fromisoformat(text)
+        except ValueError:  # pragma: no cover - defensive
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt.astimezone(UTC)
 
-async def fetch_wb_stocks_all(token: str, *, date_from: str = "2019-06-20T00:00:00Z") -> list[WBStockItem]:
-    """Fetch all stock items available for the supplier."""
 
-    headers = {"Authorization": token}
-    items: list[WBStockItem] = []
+async def fetch_wb_stocks_all(
+    token: str,
+    *,
+    date_from: str = "2019-06-20T00:00:00Z",
+) -> tuple[list[WBStockItem], datetime | None]:
+    """Fetch stock items from Wildberries with a single incremental request."""
+
+    client = get_wb_client()
     params: dict[str, Any] = {"dateFrom": date_from}
-    last_change_marker: str | None = None
+    response = await request_with_retry(
+        client,
+        method="GET",
+        path="/api/v1/supplier/stocks",
+        logger_name="integrations.wb",
+        params=params,
+        headers={"Authorization": token},
+    )
+    response.raise_for_status()
 
-    async with create_wb_client(headers=headers) as client:
-        while True:
-            response = await request_with_retry(
-                client,
-                method="GET",
-                path="/api/v1/supplier/stocks",
-                logger_name="integrations.wb",
-                params=params,
-            )
-            response.raise_for_status()
-            payload = response.json()
-            if not isinstance(payload, list) or not payload:
-                break
+    payload_raw = response.content
+    payload = orjson.loads(payload_raw)
 
-            batch: list[WBStockItem] = []
-            for entry in payload:
-                if isinstance(entry, Mapping):
-                    batch.append(WBStockItem.from_api(entry))
-            items.extend(batch)
+    items: list[WBStockItem] = []
+    last_change: datetime | None = None
+    if isinstance(payload, list):
+        for entry in payload:
+            if not isinstance(entry, Mapping):
+                continue
+            item = WBStockItem.from_api(entry)
+            items.append(item)
+            last_change_candidate = item.last_change_at
+            if last_change_candidate and (last_change is None or last_change_candidate > last_change):
+                last_change = last_change_candidate
 
-            marker = None
-            if isinstance(payload[-1], Mapping):
-                marker = payload[-1].get("lastChangeDate")
-
-            if not marker or marker == last_change_marker:
-                break
-
-            last_change_marker = str(marker)
-            params = {"dateFrom": last_change_marker}
-
-    _WB_LOGGER.info("stocks.fetched", count=len(items))
-    return items
+    _WB_LOGGER.info(
+        "stocks.fetched",
+        count=len(items),
+        date_from=date_from,
+        last_change=last_change.isoformat() if last_change else None,
+    )
+    return items, last_change
 
 
 __all__ = ["WBStockItem", "fetch_wb_stocks_all"]

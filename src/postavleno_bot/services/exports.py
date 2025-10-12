@@ -2,17 +2,25 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 from ..core.config import get_settings
 from ..core.logging import get_logger
-from ..integrations import fetch_wb_stocks_all
 from ..utils.excel import save_df_xlsx, wb_to_df_all, wb_to_df_bywh
+from .wb_cache import load_wb_rows
 
 _logger = get_logger("stocks.export")
+
+
+def _log_stage(stage: str, start: float, **fields: Any) -> None:
+    duration_ms = (perf_counter() - start) * 1000
+    payload = {"stage": stage, "duration_ms": round(duration_ms, 2), **fields}
+    _logger.info("perf.stage", **payload)
 
 
 @dataclass(slots=True)
@@ -42,10 +50,17 @@ async def export_wb_stocks_all(login: str, wb_token: str) -> ExportResult:
     prefix = "wb_ostatki_ALL"
     file_path = _exports_dir(login) / _format_filename(prefix, created_at)
 
-    items = await fetch_wb_stocks_all(wb_token)
-    payloads = [item.to_dict() for item in items]
-    df = wb_to_df_all(payloads)
-    save_df_xlsx(df, file_path)
+    fetch_start = perf_counter()
+    rows = await load_wb_rows(login, wb_token)
+    _log_stage("fetch", fetch_start, records_count=len(rows), kind="wb_all")
+
+    transform_start = perf_counter()
+    df = await asyncio.to_thread(wb_to_df_all, rows)
+    _log_stage("transform", transform_start, records_count=len(df), kind="wb_all")
+
+    write_start = perf_counter()
+    await asyncio.to_thread(save_df_xlsx, df, file_path)
+    _log_stage("write", write_start, records_count=len(df), kind="wb_all")
 
     result = ExportResult(path=file_path, rows=len(df), created_at=created_at)
     _logger.info(
@@ -63,12 +78,19 @@ async def export_wb_stocks_by_warehouse(login: str, wb_token: str) -> ExportResu
     prefix = "wb_ostatki_BY_WAREHOUSE"
     file_path = _exports_dir(login) / _format_filename(prefix, created_at)
 
-    items = await fetch_wb_stocks_all(wb_token)
-    payloads = [item.to_dict() for item in items]
-    df = wb_to_df_bywh(payloads)
-    save_df_xlsx(df, file_path)
+    fetch_start = perf_counter()
+    rows = await load_wb_rows(login, wb_token)
+    _log_stage("fetch", fetch_start, records_count=len(rows), kind="wb_by_wh")
 
-    warehouses = int(df["Склад"].nunique()) if not df.empty else 0
+    transform_start = perf_counter()
+    df = await asyncio.to_thread(wb_to_df_bywh, rows)
+    _log_stage("transform", transform_start, records_count=len(df), kind="wb_by_wh")
+
+    write_start = perf_counter()
+    await asyncio.to_thread(save_df_xlsx, df, file_path)
+    _log_stage("write", write_start, records_count=len(df), kind="wb_by_wh")
+
+    warehouses = int(df["Город склада"].nunique()) if not df.empty else 0
     result = ExportResult(
         path=file_path,
         rows=len(df),
