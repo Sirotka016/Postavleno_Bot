@@ -28,10 +28,10 @@ def validate_ms(value: str) -> bool:
 
 
 def validate_company_name(value: str) -> bool:
-    """Return ``True`` when *value* looks like a company name (2–64 chars)."""
+    """Return ``True`` when *value* looks like a company name (1–60 chars)."""
 
     stripped = value.strip()
-    return 2 <= len(stripped) <= 64
+    return 1 <= len(stripped) <= 60
 
 
 __all__ = [

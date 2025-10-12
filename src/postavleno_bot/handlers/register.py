@@ -82,4 +82,11 @@ async def handle_register_password(message: Message, state: FSMContext) -> None:
     await set_auth_user(state, profile.username)
     await state.set_state(None)
     await state.update_data(register_login=None, register_normalized=None)
-    await render_profile(message.bot, state, message.chat.id, profile, nav_action="replace")
+    await render_profile(
+        message.bot,
+        state,
+        message.chat.id,
+        profile,
+        nav_action="replace",
+        extra="Аккаунт создан ✅",
+    )

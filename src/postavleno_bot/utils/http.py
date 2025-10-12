@@ -42,8 +42,10 @@ def create_ms_client(*, headers: dict[str, str] | None = None) -> httpx.AsyncCli
 
     settings = get_settings()
     base_headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
         "Accept-Encoding": "gzip",
-        "User-Agent": "PostavlenoBot/1.0",
+        "User-Agent": "Postavleno_Bot/1.0",
     }
     if headers:
         base_headers.update(headers)
@@ -112,6 +114,7 @@ async def request_with_retry(
             continue
 
         status = response.status_code
+        response_url = str(response.request.url)
         if status in retry_statuses or status >= 500:
             retry_after_header = None
             if status == httpx.codes.TOO_MANY_REQUESTS:
@@ -120,6 +123,7 @@ async def request_with_retry(
                 "http.retry",
                 method=method,
                 target=target,
+                url=response_url,
                 attempt=attempt,
                 status=status,
                 retry_after=retry_after_header,
@@ -141,12 +145,19 @@ async def request_with_retry(
             attempt += 1
             continue
 
-        if status >= 400:
+        if not response.is_success:
+            preview = ""
+            try:
+                preview = response.text[:2048]
+            except Exception:  # pragma: no cover - defensive
+                preview = "<unavailable>"
             logger.error(
                 "http.failure",
                 method=method,
                 target=target,
+                url=response_url,
                 status=status,
+                body_preview=preview,
                 outcome="fail",
             )
             response.raise_for_status()
@@ -155,6 +166,7 @@ async def request_with_retry(
             "http.success",
             method=method,
             target=target,
+            url=response_url,
             status=status,
             attempt=attempt,
             outcome="success",

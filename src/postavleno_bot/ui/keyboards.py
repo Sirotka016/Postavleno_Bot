@@ -17,15 +17,17 @@ def _build(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
 def kb_home(is_authed: bool) -> InlineKeyboardMarkup:
     if is_authed:
         rows = [
-            [("👤 Профиль", "home.profile"), ("🚪 Выйти из профиля", "home.logout")],
-            [("📊 Остатки WB (Общие)", "stocks_wb_all"), ("🏷️ Остатки WB (По складам)", "stocks_wb_bywh")],
-            [("📘 Остатки МойСклад (Общие)", "stocks_ms_all"), ("🗑️ Удалить аккаунт", "home.delete_open")],
-            [("🔄 Обновить", "home.refresh"), ("✖️ Выйти", "home.exit")],
+            [("👤 Профиль", "home.profile")],
+            [("🚪 Выйти из профиля", "home.logout")],
+            [("🔄 Обновить", "home.refresh")],
+            [("✖️ Выйти", "home.exit")],
         ]
     else:
         rows = [
-            [("🔐 Авторизация", "auth.login"), ("🆕 Регистрация", "auth.register")],
-            [("🔄 Обновить", "home.refresh"), ("✖️ Выйти", "home.exit")],
+            [("🔐 Авторизация", "auth.login")],
+            [("🆕 Регистрация", "auth.register")],
+            [("🔄 Обновить", "home.refresh")],
+            [("✖️ Выйти", "home.exit")],
         ]
     return _build(rows)
 
@@ -43,7 +45,7 @@ def kb_auth_menu() -> InlineKeyboardMarkup:
 def kb_login() -> InlineKeyboardMarkup:
     return _build(
         [
-            [("Назад", "nav.back")],
+            [("◀️ Назад", "nav.back")],
             [("✖️ Выйти", "home.exit")],
         ]
     )
@@ -52,7 +54,7 @@ def kb_login() -> InlineKeyboardMarkup:
 def kb_register() -> InlineKeyboardMarkup:
     return _build(
         [
-            [("Назад", "nav.back")],
+            [("◀️ Назад", "nav.back")],
             [("✖️ Выйти", "home.exit")],
         ]
     )
@@ -65,8 +67,13 @@ def kb_profile() -> InlineKeyboardMarkup:
             [("🔑 Сменить WB API", "profile.wb")],
             [("🔑 Сменить «Мой Склад» API", "profile.ms")],
             [("✉️ Сменить почту (скоро)", "profile.email")],
+            [("📊 Остатки WB (Общие)", "stocks_wb_all")],
+            [("🏷️ Остатки WB (По складам)", "stocks_wb_bywh")],
+            [("📘 Остатки МойСклад (Общие)", "stocks_ms_all")],
+            [("🗑️ Удалить аккаунт", "home.delete_open")],
             [("🔄 Обновить", "profile.refresh")],
-            [("⬅️ Назад", "nav.back"), ("🚪 Выйти из профиля", "home.logout")],
+            [("◀️ Назад", "nav.back")],
+            [("🚪 Выйти из профиля", "home.logout")],
             [("✖️ Выйти", "home.exit")],
         ]
     )
@@ -76,7 +83,8 @@ def kb_export_missing_token() -> InlineKeyboardMarkup:
     return _build(
         [
             [("👤 Профиль", "home.profile")],
-            [("Назад", "nav.back"), ("✖️ Выйти", "home.exit")],
+            [("◀️ Назад", "nav.back")],
+            [("✖️ Выйти", "home.exit")],
         ]
     )
 
@@ -84,7 +92,8 @@ def kb_export_missing_token() -> InlineKeyboardMarkup:
 def kb_export_error() -> InlineKeyboardMarkup:
     return _build(
         [
-            [("Назад", "nav.back"), ("✖️ Выйти", "home.exit")],
+            [("◀️ Назад", "nav.back")],
+            [("✖️ Выйти", "home.exit")],
         ]
     )
 
@@ -92,7 +101,8 @@ def kb_export_error() -> InlineKeyboardMarkup:
 def kb_export_ready() -> InlineKeyboardMarkup:
     return _build(
         [
-            [("Назад", "nav.back"), ("✖️ Выйти", "home.exit")],
+            [("◀️ Назад", "nav.back")],
+            [("✖️ Выйти", "home.exit")],
         ]
     )
 
@@ -101,8 +111,7 @@ def kb_delete_confirm() -> InlineKeyboardMarkup:
     return _build(
         [
             [("Удалить", "home.delete_confirm")],
-            [("Назад", "home.delete_cancel")],
-            [("✖️ Выйти", "home.exit")],
+            [("Отмена", "home.delete_cancel")],
         ]
     )
 
@@ -110,7 +119,7 @@ def kb_delete_confirm() -> InlineKeyboardMarkup:
 def kb_delete_error() -> InlineKeyboardMarkup:
     return _build(
         [
-            [("Назад", "home.delete_cancel")],
+            [("◀️ Назад", "home.delete_cancel")],
             [("✖️ Выйти", "home.exit")],
         ]
     )
@@ -119,7 +128,7 @@ def kb_delete_error() -> InlineKeyboardMarkup:
 def kb_edit_wb() -> InlineKeyboardMarkup:
     return _build(
         [
-            [("Назад", "nav.back")],
+            [("◀️ Назад", "nav.back")],
             [("✖️ Выйти", "home.exit")],
         ]
     )
@@ -128,7 +137,7 @@ def kb_edit_wb() -> InlineKeyboardMarkup:
 def kb_edit_ms() -> InlineKeyboardMarkup:
     return _build(
         [
-            [("Назад", "nav.back")],
+            [("◀️ Назад", "nav.back")],
             [("✖️ Выйти", "home.exit")],
         ]
     )
@@ -137,7 +146,7 @@ def kb_edit_ms() -> InlineKeyboardMarkup:
 def kb_edit_company() -> InlineKeyboardMarkup:
     return _build(
         [
-            [("Назад", "nav.back")],
+            [("◀️ Назад", "nav.back")],
             [("✖️ Выйти", "home.exit")],
         ]
     )
@@ -146,7 +155,7 @@ def kb_edit_company() -> InlineKeyboardMarkup:
 def kb_edit_email() -> InlineKeyboardMarkup:
     return _build(
         [
-            [("Назад", "nav.back")],
+            [("◀️ Назад", "nav.back")],
             [("✖️ Выйти", "home.exit")],
         ]
     )
@@ -156,7 +165,7 @@ def kb_unknown() -> InlineKeyboardMarkup:
     return _build(
         [
             [("Повторить", "unknown.repeat")],
-            [("✖️ Выйти", "unknown.exit")],
+            [("Выйти", "unknown.exit")],
         ]
     )
 

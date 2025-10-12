@@ -30,6 +30,7 @@ def test_validate_ms_accepts_extended_charset() -> None:
 def test_validate_company_name() -> None:
     assert validate_company_name("OOO Ромашка")
     assert validate_company_name("My Co")
+    assert validate_company_name("A")
     assert not validate_company_name(" ")
-    assert not validate_company_name("A")
-    assert not validate_company_name("B" * 128)
+    assert not validate_company_name("")
+    assert not validate_company_name("B" * 61)

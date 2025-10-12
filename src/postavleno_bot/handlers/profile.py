@@ -10,7 +10,6 @@ from ..domain import validate_company_name, validate_ms, validate_wb
 from ..services.accounts import get_accounts_repo
 from ..state import EditCompanyState, EditMSState, EditWBState
 from .pages import (
-    SUCCESS_SAVED,
     render_edit_company,
     render_edit_email,
     render_edit_ms,
@@ -92,7 +91,7 @@ async def handle_wb_token(message: Message, state: FSMContext) -> None:
             state,
             message.chat.id,
             nav_action="replace",
-            prompt="Ключ WB должен содержать от 32 до 512 символов.",
+            prompt="Проверьте ключ WB: длина должна быть 32–512 символов.",
         )
         return
     repo = get_accounts_repo()
@@ -108,7 +107,7 @@ async def handle_wb_token(message: Message, state: FSMContext) -> None:
         message.chat.id,
         updated,
         nav_action="replace",
-        extra=SUCCESS_SAVED,
+        extra="Ключ WB обновлён ✅",
     )
 
 
@@ -122,7 +121,7 @@ async def handle_ms_token(message: Message, state: FSMContext) -> None:
             state,
             message.chat.id,
             nav_action="replace",
-            prompt="Ключ «Мой Склад» должен содержать 16–4096 символов латиницы/цифр и . _ : / + = -",
+            prompt="Проверьте ключ «Мой Склад»: допустимы латиница, цифры и . _ : / + = - (16–4096).",
         )
         return
     repo = get_accounts_repo()
@@ -138,7 +137,7 @@ async def handle_ms_token(message: Message, state: FSMContext) -> None:
         message.chat.id,
         updated,
         nav_action="replace",
-        extra=SUCCESS_SAVED,
+        extra="Ключ «Мой Склад» обновлён ✅",
     )
 
 
@@ -152,7 +151,7 @@ async def handle_company_name(message: Message, state: FSMContext) -> None:
             state,
             message.chat.id,
             nav_action="replace",
-            prompt="Название должно быть длиной от 2 до 64 символов.",
+            prompt="Название должно быть длиной от 1 до 60 символов.",
         )
         return
 
@@ -170,5 +169,5 @@ async def handle_company_name(message: Message, state: FSMContext) -> None:
         message.chat.id,
         updated,
         nav_action="replace",
-        extra=SUCCESS_SAVED,
+        extra="Название компании обновлено ✅",
     )
