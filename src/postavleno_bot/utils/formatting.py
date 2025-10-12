@@ -8,11 +8,13 @@ from datetime import datetime
 def format_date_ru(value: datetime) -> str:
     """Format ``value`` using Russian day-first notation ``DD.MM.YYYY``.
 
-    The function converts the input timestamp to the local timezone before
-    formatting so that the displayed date matches the user's expectations.
+    The original calendar date is preserved without converting the timestamp to
+    the local timezone to avoid accidental day rollovers for values close to
+    midnight in UTC.
     """
 
-    return value.astimezone().strftime("%d.%m.%Y")
+    d = value.date()
+    return f"{d.day:02d}.{d.month:02d}.{d.year:04d}"
 
 
 def mask_token(token: str | None, left: int = 4, right: int = 4) -> str:

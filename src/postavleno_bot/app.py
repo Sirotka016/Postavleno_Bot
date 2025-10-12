@@ -25,11 +25,11 @@ async def _on_startup(bot: Bot) -> None:
     logger.info("Команды обновлены", commands=[command.command for command in BOT_COMMANDS])
 
 
-async def _setup_http_client(_: Dispatcher) -> None:
+async def _setup_http_client(*_args: object, **_kwargs: object) -> None:
     init_http_client()
 
 
-async def _close_http_client(_: Dispatcher) -> None:
+async def _close_http_client(*_args: object, **_kwargs: object) -> None:
     await close_http_client()
 
 
