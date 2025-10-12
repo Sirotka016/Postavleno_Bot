@@ -6,11 +6,12 @@ from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
-from ..domain import validate_ms, validate_wb
+from ..domain import validate_company_name, validate_ms, validate_wb
 from ..services.accounts import get_accounts_repo
-from ..state import EditMSState, EditWBState
+from ..state import EditCompanyState, EditMSState, EditWBState
 from .pages import (
     SUCCESS_SAVED,
+    render_edit_company,
     render_edit_email,
     render_edit_ms,
     render_edit_wb,
@@ -32,6 +33,19 @@ async def refresh_profile(callback: CallbackQuery, state: FSMContext) -> None:
         await render_require_auth(callback.bot, state, callback.message.chat.id, nav_action="replace")
         return
     await render_profile(callback.bot, state, callback.message.chat.id, profile, nav_action="replace")
+
+
+@router.callback_query(F.data == "profile.company")
+async def edit_company(callback: CallbackQuery, state: FSMContext) -> None:
+    if callback.message is None:
+        return
+    await callback.answer()
+    profile = await load_active_profile(state)
+    if not profile:
+        await render_require_auth(callback.bot, state, callback.message.chat.id, nav_action="replace")
+        return
+    await state.set_state(EditCompanyState.await_name)
+    await render_edit_company(callback.bot, state, callback.message.chat.id, nav_action="push")
 
 
 @router.callback_query(F.data == "profile.wb")
@@ -78,7 +92,7 @@ async def handle_wb_token(message: Message, state: FSMContext) -> None:
             state,
             message.chat.id,
             nav_action="replace",
-            prompt="Ключ WB должен содержать 32–4096 символов латиницы/цифр и . _ - =",
+            prompt="Ключ WB должен содержать от 32 до 512 символов.",
         )
         return
     repo = get_accounts_repo()
@@ -117,6 +131,38 @@ async def handle_ms_token(message: Message, state: FSMContext) -> None:
         await render_require_auth(message.bot, state, message.chat.id, nav_action="replace")
         return
     updated = repo.set_ms_api(profile.username, token)
+    await state.set_state(None)
+    await render_profile(
+        message.bot,
+        state,
+        message.chat.id,
+        updated,
+        nav_action="replace",
+        extra=SUCCESS_SAVED,
+    )
+
+
+@router.message(EditCompanyState.await_name)
+async def handle_company_name(message: Message, state: FSMContext) -> None:
+    await delete_user_message(message)
+    company_name = message.text or ""
+    if not validate_company_name(company_name):
+        await render_edit_company(
+            message.bot,
+            state,
+            message.chat.id,
+            nav_action="replace",
+            prompt="Название должно быть длиной от 2 до 64 символов.",
+        )
+        return
+
+    repo = get_accounts_repo()
+    profile = await load_active_profile(state)
+    if not profile:
+        await render_require_auth(message.bot, state, message.chat.id, nav_action="replace")
+        return
+
+    updated = repo.set_company_name(profile.username, company_name.strip())
     await state.set_state(None)
     await render_profile(
         message.bot,

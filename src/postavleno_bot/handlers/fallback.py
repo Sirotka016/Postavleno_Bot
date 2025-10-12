@@ -9,16 +9,26 @@ from aiogram.types import CallbackQuery, Message
 from ..navigation import (
     SCREEN_AUTH_MENU,
     SCREEN_DELETE_CONFIRM,
+    SCREEN_EDIT_COMPANY,
+    SCREEN_EDIT_EMAIL,
+    SCREEN_EDIT_MS,
+    SCREEN_EDIT_WB,
+    SCREEN_EXPORT_DONE,
+    SCREEN_EXPORT_STATUS,
     SCREEN_HOME,
     SCREEN_LOGIN,
     SCREEN_PROFILE,
     SCREEN_REGISTER,
     nav_back,
 )
-from ..state import LoginStates, RegisterStates
+from ..state import EditCompanyState, EditMSState, EditWBState, LoginStates, RegisterStates
 from .pages import (
     render_delete_confirm,
     render_delete_error,
+    render_edit_company,
+    render_edit_email,
+    render_edit_ms,
+    render_edit_wb,
     render_home,
     render_login,
     render_profile,
@@ -85,6 +95,26 @@ async def repeat_previous(callback: CallbackQuery, state: FSMContext) -> None:
             await render_require_auth(callback.bot, state, callback.message.chat.id, nav_action="replace")
         else:
             await render_delete_confirm(callback.bot, state, callback.message.chat.id, nav_action="replace")
+    elif previous.name == SCREEN_EDIT_COMPANY:
+        await state.set_state(EditCompanyState.await_name)
+        await render_edit_company(callback.bot, state, callback.message.chat.id, nav_action="replace")
+    elif previous.name == SCREEN_EDIT_WB:
+        await state.set_state(EditWBState.await_token)
+        await render_edit_wb(callback.bot, state, callback.message.chat.id, nav_action="replace")
+    elif previous.name == SCREEN_EDIT_MS:
+        await state.set_state(EditMSState.await_token)
+        await render_edit_ms(callback.bot, state, callback.message.chat.id, nav_action="replace")
+    elif previous.name == SCREEN_EDIT_EMAIL:
+        await render_edit_email(callback.bot, state, callback.message.chat.id, nav_action="replace")
+    elif previous.name in {SCREEN_EXPORT_STATUS, SCREEN_EXPORT_DONE}:
+        await render_home(
+            callback.bot,
+            state,
+            callback.message.chat.id,
+            nav_action="replace",
+            is_authed=profile is not None,
+            profile=profile,
+        )
     else:
         await render_home(
             callback.bot,

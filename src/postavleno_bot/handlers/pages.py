@@ -10,9 +10,11 @@ from aiogram.fsm.context import FSMContext
 from ..navigation import (
     SCREEN_AUTH_MENU,
     SCREEN_DELETE_CONFIRM,
+    SCREEN_EDIT_COMPANY,
     SCREEN_EDIT_EMAIL,
     SCREEN_EDIT_MS,
     SCREEN_EDIT_WB,
+    SCREEN_EXPORT_DONE,
     SCREEN_EXPORT_STATUS,
     SCREEN_HOME,
     SCREEN_LOGIN,
@@ -30,11 +32,13 @@ from ..ui import (
     kb_auth_menu,
     kb_delete_confirm,
     kb_delete_error,
+    kb_edit_company,
     kb_edit_email,
     kb_edit_ms,
     kb_edit_wb,
     kb_export_error,
     kb_export_missing_token,
+    kb_export_ready,
     kb_home,
     kb_login,
     kb_profile,
@@ -61,8 +65,9 @@ AUTH_HOME_TEMPLATE = (
 )
 
 EXPORT_PROGRESS_TEXT = "Готовлю файл… это может занять до минуты ⏳"
-EXPORT_MISSING_TEMPLATE = "Не хватает ключа {service}. Откройте профиль и добавьте токен."
-EXPORT_ERROR_TEXT = "Не удалось сформировать файл, попробуйте позже."
+EXPORT_READY_TEMPLATE = "Готово ✅\n{summary}"
+EXPORT_MISSING_TEMPLATE = "Добавьте ключи в профиле."
+EXPORT_ERROR_TEXT = "Не получилось собрать файл 😕 Попробуйте ещё раз или зайдите чуть позже."
 
 REQUIRE_AUTH_TEXT = "Требуется авторизация."
 
@@ -73,13 +78,14 @@ REGISTER_TEXT = (
     "Придумайте логин: латиница, цифры, точка, дефис, подчёркивание (3–32)."
 )
 REGISTER_PASSWORD_TEXT = "🆕 Регистрация\n\nВведите пароль (≥ 6 символов)."
+EDIT_COMPANY_TEXT = "🏢 Название компании\n\nВведите новое название (2–64 символа)."
 EDIT_WB_TEXT = "🔧 Смена WB API ключа\n\nОтправьте новый ключ."
 EDIT_MS_TEXT = "🔧 Смена «Мой Склад» API ключа\n\nОтправьте новый ключ."
 EDIT_EMAIL_TEXT = "📧 Почта\n\nСкоро здесь появится подтверждение email."
 LOGIN_ERROR_TEXT = "Аккаунт не найден."
 REGISTER_TAKEN_TEXT = "Логин занят, придумайте другой."
 SUCCESS_SAVED = "Сохранено."
-UNKNOWN_TEXT = "Хмм… я не понял запрос 🤔\nВыберите, что сделать дальше."
+UNKNOWN_TEXT = "Не понял запрос 🤔\nВыберите, что сделать дальше."
 
 DELETE_CONFIRM_TEXT = (
     "Удаление аккаунта\n\n"
@@ -161,7 +167,10 @@ async def render_export_missing_token(
         nav_action,
         ScreenState(SCREEN_EXPORT_STATUS, {"service": service, "status": "missing"}),
     )
-    text = EXPORT_MISSING_TEMPLATE.format(service=service)
+    if service.upper() == "MS":
+        text = EXPORT_MISSING_TEMPLATE
+    else:
+        text = f"Не хватает ключа {service}. {EXPORT_MISSING_TEMPLATE}"
     return await card_manager.render(
         bot,
         chat_id,
@@ -189,6 +198,30 @@ async def render_export_error(
         chat_id,
         EXPORT_ERROR_TEXT,
         reply_markup=kb_export_error(),
+        state=state,
+    )
+
+
+async def render_export_ready(
+    bot: Bot,
+    state: FSMContext,
+    chat_id: int,
+    *,
+    kind: str,
+    summary: str,
+    nav_action: str = "replace",
+) -> int:
+    await _apply_nav(
+        state,
+        nav_action,
+        ScreenState(SCREEN_EXPORT_DONE, {"kind": kind, "status": "done"}),
+    )
+    text = EXPORT_READY_TEMPLATE.format(summary=summary)
+    return await card_manager.render(
+        bot,
+        chat_id,
+        text,
+        reply_markup=kb_export_ready(),
         state=state,
     )
 
@@ -335,6 +368,25 @@ async def render_profile(
         lines.extend(["", extra])
     text = "\n".join(lines)
     return await card_manager.render(bot, chat_id, text, reply_markup=kb_profile(), state=state)
+
+
+async def render_edit_company(
+    bot: Bot,
+    state: FSMContext,
+    chat_id: int,
+    *,
+    nav_action: str = "push",
+    prompt: str | None = None,
+) -> int:
+    await _apply_nav(state, nav_action, ScreenState(SCREEN_EDIT_COMPANY))
+    text = EDIT_COMPANY_TEXT if not prompt else f"{EDIT_COMPANY_TEXT}\n\n{prompt}"
+    return await card_manager.render(
+        bot,
+        chat_id,
+        text,
+        reply_markup=kb_edit_company(),
+        state=state,
+    )
 
 
 async def render_edit_wb(

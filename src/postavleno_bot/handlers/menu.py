@@ -20,6 +20,7 @@ from .pages import (
     render_export_error,
     render_export_missing_token,
     render_export_progress,
+    render_export_ready,
     render_home,
     render_require_auth,
 )
@@ -106,14 +107,13 @@ async def _handle_export(
         return
 
     summary = _summary_for_result(kind, result)
-    await render_home(
+    await render_export_ready(
         bot,
         state,
         chat_id,
+        kind=kind,
+        summary=summary,
         nav_action="replace",
-        is_authed=True,
-        profile=profile,
-        extra=summary,
     )
 
 
@@ -129,7 +129,7 @@ async def handle_wb_all(callback: CallbackQuery, state: FSMContext) -> None:
     )
 
 
-@router.callback_query(F.data == "stocks_wb_by_wh")
+@router.callback_query(F.data == "stocks_wb_bywh")
 async def handle_wb_by_warehouse(callback: CallbackQuery, state: FSMContext) -> None:
     await _handle_export(
         callback,
