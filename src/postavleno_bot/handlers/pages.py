@@ -13,6 +13,7 @@ from ..navigation import (
     SCREEN_EDIT_EMAIL,
     SCREEN_EDIT_MS,
     SCREEN_EDIT_WB,
+    SCREEN_EXPORT_STATUS,
     SCREEN_HOME,
     SCREEN_LOGIN,
     SCREEN_PROFILE,
@@ -27,9 +28,13 @@ from ..services.accounts import AccountProfile
 from ..ui import (
     card_manager,
     kb_auth_menu,
+    kb_delete_confirm,
+    kb_delete_error,
     kb_edit_email,
     kb_edit_ms,
     kb_edit_wb,
+    kb_export_error,
+    kb_export_missing_token,
     kb_home,
     kb_login,
     kb_profile,
@@ -37,8 +42,6 @@ from ..ui import (
     kb_retry_login,
     kb_retry_register,
     kb_unknown,
-    kb_delete_confirm,
-    kb_delete_error,
 )
 
 GUEST_HOME_TEXT = (
@@ -56,6 +59,10 @@ AUTH_HOME_TEMPLATE = (
     "• МойСклад API: {ms}\n\n"
     "Откройте профиль, чтобы изменить данные."
 )
+
+EXPORT_PROGRESS_TEXT = "Готовлю файл… это может занять до минуты ⏳"
+EXPORT_MISSING_TEMPLATE = "Не хватает ключа {service}. Откройте профиль и добавьте токен."
+EXPORT_ERROR_TEXT = "Не удалось сформировать файл, попробуйте позже."
 
 REQUIRE_AUTH_TEXT = "Требуется авторизация."
 
@@ -100,6 +107,7 @@ async def render_home(
     nav_action: str = "root",
     is_authed: bool = False,
     profile: AccountProfile | None = None,
+    extra: str | None = None,
 ) -> int:
     await _apply_nav(state, nav_action, ScreenState(SCREEN_HOME))
     if not is_authed or profile is None:
@@ -112,8 +120,77 @@ async def render_home(
             wb="✅" if profile.wb_api else "—",
             ms="✅" if profile.ms_api else "—",
         )
+        if extra:
+            text = f"{text}\n\n{extra}"
         keyboard = kb_home(True)
     return await card_manager.render(bot, chat_id, text, reply_markup=keyboard, state=state)
+
+
+async def render_export_progress(
+    bot: Bot,
+    state: FSMContext,
+    chat_id: int,
+    *,
+    kind: str,
+    nav_action: str = "push",
+) -> int:
+    await _apply_nav(
+        state,
+        nav_action,
+        ScreenState(SCREEN_EXPORT_STATUS, {"kind": kind, "status": "progress"}),
+    )
+    return await card_manager.render(
+        bot,
+        chat_id,
+        EXPORT_PROGRESS_TEXT,
+        reply_markup=None,
+        state=state,
+    )
+
+
+async def render_export_missing_token(
+    bot: Bot,
+    state: FSMContext,
+    chat_id: int,
+    *,
+    service: str,
+    nav_action: str = "push",
+) -> int:
+    await _apply_nav(
+        state,
+        nav_action,
+        ScreenState(SCREEN_EXPORT_STATUS, {"service": service, "status": "missing"}),
+    )
+    text = EXPORT_MISSING_TEMPLATE.format(service=service)
+    return await card_manager.render(
+        bot,
+        chat_id,
+        text,
+        reply_markup=kb_export_missing_token(),
+        state=state,
+    )
+
+
+async def render_export_error(
+    bot: Bot,
+    state: FSMContext,
+    chat_id: int,
+    *,
+    kind: str,
+    nav_action: str = "replace",
+) -> int:
+    await _apply_nav(
+        state,
+        nav_action,
+        ScreenState(SCREEN_EXPORT_STATUS, {"kind": kind, "status": "error"}),
+    )
+    return await card_manager.render(
+        bot,
+        chat_id,
+        EXPORT_ERROR_TEXT,
+        reply_markup=kb_export_error(),
+        state=state,
+    )
 
 
 async def render_delete_confirm(

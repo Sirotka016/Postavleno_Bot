@@ -18,6 +18,9 @@ def kb_home(is_authed: bool) -> InlineKeyboardMarkup:
     if is_authed:
         rows = [
             [("👤 Профиль", "home.profile")],
+            [("📊 Остатки WB (Общие)", "stocks_wb_all")],
+            [("🏷️ Остатки WB (По складам)", "stocks_wb_by_wh")],
+            [("📘 Остатки МойСклад (Общие)", "stocks_ms_all")],
             [("🚪 Выйти из профиля", "home.logout")],
             [("🗑️ Удалить аккаунт", "home.delete_open")],
             [("🔄 Обновить", "home.refresh")],
@@ -70,6 +73,25 @@ def kb_profile() -> InlineKeyboardMarkup:
             [("🔄 Обновить", "profile.refresh")],
             [("⬅️ Назад", "nav.back")],
             [("🚪 Выйти из профиля", "home.logout")],
+            [("✖️ Выйти", "home.exit")],
+        ]
+    )
+
+
+def kb_export_missing_token() -> InlineKeyboardMarkup:
+    return _build(
+        [
+            [("Открыть профиль", "home.profile")],
+            [("Назад", "nav.back")],
+            [("✖️ Выйти", "home.exit")],
+        ]
+    )
+
+
+def kb_export_error() -> InlineKeyboardMarkup:
+    return _build(
+        [
+            [("Назад", "nav.back")],
             [("✖️ Выйти", "home.exit")],
         ]
     )
@@ -154,6 +176,8 @@ __all__ = [
     "kb_login",
     "kb_register",
     "kb_profile",
+    "kb_export_missing_token",
+    "kb_export_error",
     "kb_edit_wb",
     "kb_edit_ms",
     "kb_edit_email",
