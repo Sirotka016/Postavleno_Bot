@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import asyncio
 from collections.abc import Iterable
-from functools import lru_cache
 from typing import Any
 
 import httpx
@@ -20,19 +20,34 @@ from ..core.logging import get_logger
 _WB_BASE_URL = "https://statistics-api.wildberries.ru"
 _WB_TIMEOUT = httpx.Timeout(connect=5.0, read=25.0, write=5.0, pool=5.0)
 
+_CLIENT: httpx.AsyncClient | None = None
 
-@lru_cache(maxsize=1)
-def get_wb_client() -> httpx.AsyncClient:
-    """Return a cached AsyncClient for Wildberries API calls."""
 
-    get_settings()  # ensure directories are initialized
-    client = httpx.AsyncClient(
+def init_http_client() -> None:
+    global _CLIENT
+    if _CLIENT is not None:
+        return
+    get_settings()
+    _CLIENT = httpx.AsyncClient(
         base_url=_WB_BASE_URL,
         headers={"Accept-Encoding": "gzip"},
         http2=HTTP2_AVAILABLE,
         timeout=_WB_TIMEOUT,
     )
-    return client
+
+
+def get_wb_client() -> httpx.AsyncClient:
+    if _CLIENT is None:
+        raise RuntimeError("HTTP client not initialised")
+    return _CLIENT
+
+
+async def close_http_client() -> None:
+    global _CLIENT
+    if _CLIENT is None:
+        return
+    await _CLIENT.aclose()
+    _CLIENT = None
 
 
 async def request_with_retry(

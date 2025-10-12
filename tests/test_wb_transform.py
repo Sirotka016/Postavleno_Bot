@@ -48,7 +48,7 @@ def test_wb_all_aggregation_no_duplicates() -> None:
     assert row["Итого"] == 7
 
 
-def test_wb_all_prefers_most_common_ids() -> None:
+def test_wb_all_groups_by_article_and_nm() -> None:
     payload = [
         {
             "supplierArticle": "B",
@@ -79,13 +79,14 @@ def test_wb_all_prefers_most_common_ids() -> None:
         },
     ]
     df = wb_to_df_all(payload)
-    assert len(df) == 1
-    row = df.iloc[0]
-    assert row["Артикул поставщика"] == "B"
-    assert row["nmId"] == 11
-    assert row["Штрихкод"] == "x1"
-    assert row["Кол-во"] == 6
-    assert row["Итого"] == 7
+    assert len(df) == 2
+    first = df[df["nmId"] == 10].iloc[0]
+    second = df[df["nmId"] == 11].iloc[0]
+    assert first["Артикул поставщика"] == "B"
+    assert first["Штрихкод"] == "x1"
+    assert first["Кол-во"] == 1
+    assert second["Кол-во"] == 5
+    assert second["Штрихкод"] == "x2"
 
 
 def test_wb_all_uses_first_nonempty_barcode() -> None:

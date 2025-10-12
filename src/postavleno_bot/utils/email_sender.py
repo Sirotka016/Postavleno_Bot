@@ -32,7 +32,7 @@ async def send_email(
         smtp = SMTP(hostname=host, port=port, use_tls=True, timeout=timeout)
         await smtp.connect()
     else:
-        smtp = SMTP(hostname=host, port=port, timeout=timeout)
+        smtp = SMTP(hostname=host, port=port, start_tls=False, timeout=timeout)
         await smtp.connect()
         await smtp.starttls()
 

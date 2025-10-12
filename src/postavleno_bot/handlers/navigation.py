@@ -18,9 +18,12 @@ from ..navigation import (
     SCREEN_LOGIN,
     SCREEN_PROFILE,
     SCREEN_REGISTER,
+    ScreenState,
     nav_back,
+    nav_root,
 )
-from ..state import EditCompanyState, EditEmailState, EditWBState, LoginStates, RegisterStates
+from ..ui import card_manager
+from ..state import CompanyStates, EmailStates, LoginStates, RegisterStates, WbStates
 from .pages import (
     render_company_delete_confirm,
     render_company_menu,
@@ -36,6 +39,8 @@ from .pages import (
     render_profile,
     render_register,
     render_require_auth,
+    render_wb_delete_confirm,
+    render_wb_menu,
 )
 from .utils import load_active_profile
 
@@ -127,7 +132,7 @@ async def go_back(callback: CallbackQuery, state: FSMContext) -> None:
             await state.set_state(None)
             await render_company_delete_confirm(bot, state, chat_id, nav_action="replace")
         else:
-            await state.set_state(EditCompanyState.await_name)
+            await state.set_state(CompanyStates.waiting_name)
             await render_company_prompt(
                 bot,
                 state,
@@ -136,8 +141,25 @@ async def go_back(callback: CallbackQuery, state: FSMContext) -> None:
                 rename=bool(previous.params.get("rename")),
             )
     elif previous.name == SCREEN_EDIT_WB:
-        await state.set_state(EditWBState.await_token)
-        await render_edit_wb(bot, state, chat_id, nav_action="replace")
+        mode = previous.params.get("mode")
+        if mode == "menu":
+            if not profile:
+                await render_require_auth(bot, state, chat_id, nav_action="replace")
+            else:
+                await state.set_state(None)
+                await render_wb_menu(
+                    bot,
+                    state,
+                    chat_id,
+                    profile=profile,
+                    nav_action="replace",
+                )
+        elif mode == "delete":
+            await state.set_state(None)
+            await render_wb_delete_confirm(bot, state, chat_id, nav_action="replace")
+        else:
+            await state.set_state(WbStates.waiting_token)
+            await render_edit_wb(bot, state, chat_id, nav_action="replace")
     elif previous.name == SCREEN_EDIT_EMAIL:
         mode = previous.params.get("mode")
         if mode == "menu":
@@ -156,7 +178,7 @@ async def go_back(callback: CallbackQuery, state: FSMContext) -> None:
             await state.set_state(None)
             await render_email_unlink_confirm(bot, state, chat_id, nav_action="replace")
         else:
-            await state.set_state(EditEmailState.await_email)
+            await state.set_state(EmailStates.waiting_email)
             await render_edit_email(bot, state, chat_id, nav_action="replace")
     elif previous.name in {SCREEN_EXPORT_STATUS, SCREEN_EXPORT_DONE}:
         await render_home(
@@ -178,3 +200,14 @@ async def go_back(callback: CallbackQuery, state: FSMContext) -> None:
             profile=profile,
             tg_user=tg_user,
         )
+
+
+@router.callback_query(F.data == "nav.exit")
+async def handle_exit(callback: CallbackQuery, state: FSMContext) -> None:
+    if callback.message is None:
+        return
+
+    await callback.answer()
+    await state.set_state(None)
+    await card_manager.close(callback.bot, callback.message.chat.id, state=state)
+    await nav_root(state, ScreenState(SCREEN_HOME))

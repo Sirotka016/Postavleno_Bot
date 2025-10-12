@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable
+import time
 
 from ..core.config import get_settings
 from ..core.logging import get_logger
@@ -15,6 +16,8 @@ from ..integrations.wildberries import WBStockItem
 _logger = get_logger("stocks.cache")
 
 _BASELINE = datetime(2019, 6, 20, tzinfo=UTC)
+
+_MEM_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 
 
 def _cache_dir(login: str) -> Path:
@@ -115,7 +118,16 @@ def _calc_date_from(last_sync_at: datetime | None) -> datetime:
     return candidate
 
 
-async def load_wb_rows(login: str, token: str) -> list[dict[str, Any]]:
+async def load_wb_rows(login: str, token: str, *, bypass_cache: bool = False) -> list[dict[str, Any]]:
+    ttl = max(5, int(get_settings().cache_ttl_seconds or 0))
+    now = time.monotonic()
+    cache_key = token.strip()
+    if not bypass_cache:
+        cached = _MEM_CACHE.get(cache_key)
+        if cached and now - cached[0] < ttl:
+            _logger.debug("cache.memory_hit", login=login, ttl=ttl)
+            return [dict(item) for item in cached[1]]
+
     cache = WBCache.load(login)
     date_from_dt = _calc_date_from(cache.last_sync_at)
     date_from = date_from_dt.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -141,7 +153,10 @@ async def load_wb_rows(login: str, token: str) -> list[dict[str, Any]]:
     if updated or not cache.path.exists():
         cache.save()
 
-    return cache.rows()
+    rows = cache.rows()
+    rows_copy = [dict(row) for row in rows]
+    _MEM_CACHE[cache_key] = (now, rows_copy)
+    return [dict(row) for row in rows_copy]
 
 
 __all__ = ["load_wb_rows"]

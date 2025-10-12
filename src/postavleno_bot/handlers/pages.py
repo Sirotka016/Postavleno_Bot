@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-
 from aiogram import Bot
 from aiogram.fsm.context import FSMContext
 from aiogram.types import User
@@ -52,6 +50,21 @@ from ..ui import (
     kb_wb_delete_confirm,
     kb_wb_menu,
 )
+from ..ui.texts import (
+    company_delete_confirm_text,
+    company_menu_text,
+    company_prompt_text,
+    company_rename_prompt_text,
+    email_code_prompt,
+    email_menu_text,
+    email_prompt_text,
+    email_unlink_confirm_text,
+    profile_header,
+    wb_delete_confirm_text,
+    wb_menu_text,
+    wb_prompt_text,
+)
+from ..utils.formatting import mask_token
 
 HOME_INVITE_TEMPLATE = (
     "Привет, {tg_name}! ✨\n"
@@ -75,9 +88,7 @@ HOME_INVITE_TEMPLATE = (
     "Удачной работы! 🚀"
 )
 
-PROFILE_HINT = "Профиль поможет обновить данные и запустить экспорт."
-
-EXPORT_PROGRESS_TEXT = "Собираю данные…"
+EXPORT_PROGRESS_TEXT = "⌛ Формирую файл…"
 EXPORT_READY_TEMPLATE = "Готово ✅"
 EXPORT_MISSING_TEMPLATE = "Добавьте ключи в профиле."
 EXPORT_ERROR_TEMPLATE = (
@@ -93,43 +104,6 @@ REGISTER_TEXT = (
     "Придумайте логин: латиница, цифры, точка, дефис, подчёркивание (3–32)."
 )
 REGISTER_PASSWORD_TEXT = "🆕 Регистрация\n\nЛогин принят. Введите пароль (≥ 6 символов)."
-COMPANY_REQUEST_TEXT = (
-    "Укажите название вашей компании одним сообщением (до 70 символов). Его всегда можно изменить."
-)
-COMPANY_RENAME_TEXT = (
-    "✏️ Переименовать компанию\n\n"
-    "Отправьте новое название (до 70 символов)."
-)
-COMPANY_MENU_TEMPLATE = (
-    "🏢 Компания\n\n"
-    "Текущее название: {company}"
-)
-COMPANY_DELETE_CONFIRM_TEXT = "Вы уверены? Да/Нет"
-WB_MENU_TEXT = (
-    "🔑 WB API\n\n"
-    "Ключ подключён. Можно изменить или удалить."
-)
-
-WB_DELETE_CONFIRM_TEXT = "Удалить ключ WB API? Действие необратимо."
-
-EDIT_WB_TEXT = (
-    "🔑 WB API\n\n"
-    "Отправьте ключ WB API одним сообщением. Его можно сгенерировать в кабинете WB (Доступ к API)."
-)
-EMAIL_REQUEST_TEXT = (
-    "✉️ Почта\n\n"
-    "Укажите адрес электронной почты одним сообщением (пример: name@domain.com). Мы отправим код подтверждения."
-)
-EMAIL_CODE_TEXT = (
-    "✉️ Почта\n\n"
-    "Мы отправили код на {email}. Введите код одним сообщением. Отменить — /cancel."
-)
-EMAIL_UNLINK_TEXT = "Отвязать почту? Вы уверены?"
-EMAIL_MENU_TEMPLATE = (
-    "✉️ Почта\n\n"
-    "Текущий адрес: {email}\n"
-    "Статус: {status}"
-)
 LOGIN_ERROR_TEXT = "Аккаунт не найден."
 REGISTER_TAKEN_TEXT = "Логин занят, придумайте другой."
 UNKNOWN_TEXT = "Не понял запрос 🤔"
@@ -381,10 +355,6 @@ async def render_register_taken(bot: Bot, state: FSMContext, chat_id: int) -> in
     )
 
 
-def _format_datetime(dt: datetime) -> str:
-    return dt.astimezone().strftime("%Y-%m-%d %H:%M")
-
-
 async def render_profile(
     bot: Bot,
     state: FSMContext,
@@ -395,27 +365,9 @@ async def render_profile(
     extra: str | None = None,
 ) -> int:
     await _apply_nav(state, nav_action, ScreenState(SCREEN_PROFILE))
-    wb_state = "✅" if profile.wb_api else "❌"
-    if profile.email:
-        status = "подтверждена ✅" if profile.email_verified else "не подтверждена ❌"
-        email_line = f"{profile.email} ({status})"
-    else:
-        email_line = "—"
-    company = profile.company_name.strip() if profile.company_name else ""
-    if not company:
-        company = "—"
-    lines = [
-        f"👤 Профиль: {profile.display_login}",
-        f"Компания: {company}",
-        f"Дата регистрации: {_format_datetime(profile.created_at)}",
-        f"Почта: {email_line}",
-        f"WB API: {wb_state}",
-        "",
-        PROFILE_HINT,
-    ]
+    text = profile_header(profile)
     if extra:
-        lines.extend(["", extra])
-    text = "\n".join(lines)
+        text = f"{text}\n\n{extra}"
     return await card_manager.render(bot, chat_id, text, reply_markup=kb_profile(), state=state)
 
 
@@ -428,10 +380,8 @@ async def render_company_menu(
     nav_action: str = "push",
 ) -> int:
     await _apply_nav(state, nav_action, ScreenState(SCREEN_EDIT_COMPANY, {"mode": "menu"}))
-    company = profile.company_name.strip() if profile.company_name else ""
-    if not company:
-        company = "—"
-    text = COMPANY_MENU_TEMPLATE.format(company=company)
+    company = profile.company_name.strip() if profile.company_name else "—"
+    text = company_menu_text(company)
     return await card_manager.render(
         bot,
         chat_id,
@@ -455,7 +405,7 @@ async def render_company_prompt(
         nav_action,
         ScreenState(SCREEN_EDIT_COMPANY, {"mode": "prompt", "rename": rename}),
     )
-    base = COMPANY_RENAME_TEXT if rename else COMPANY_REQUEST_TEXT
+    base = company_rename_prompt_text() if rename else company_prompt_text()
     text = base if not prompt else f"{base}\n\n{prompt}"
     return await card_manager.render(
         bot,
@@ -479,7 +429,8 @@ async def render_edit_wb(
         nav_action,
         ScreenState(SCREEN_EDIT_WB, {"mode": "prompt"}),
     )
-    text = EDIT_WB_TEXT if not prompt else f"{EDIT_WB_TEXT}\n\n{prompt}"
+    base = wb_prompt_text()
+    text = base if not prompt else f"{base}\n\n{prompt}"
     return await card_manager.render(bot, chat_id, text, reply_markup=kb_edit_wb(), state=state)
 
 
@@ -488,6 +439,7 @@ async def render_wb_menu(
     state: FSMContext,
     chat_id: int,
     *,
+    profile: AccountProfile,
     nav_action: str = "push",
 ) -> int:
     await _apply_nav(
@@ -495,13 +447,9 @@ async def render_wb_menu(
         nav_action,
         ScreenState(SCREEN_EDIT_WB, {"mode": "menu"}),
     )
-    return await card_manager.render(
-        bot,
-        chat_id,
-        WB_MENU_TEXT,
-        reply_markup=kb_wb_menu(),
-        state=state,
-    )
+    masked = mask_token(profile.wb_api)
+    text = wb_menu_text(masked)
+    return await card_manager.render(bot, chat_id, text, reply_markup=kb_wb_menu(), state=state)
 
 
 async def render_wb_delete_confirm(
@@ -517,7 +465,8 @@ async def render_wb_delete_confirm(
         nav_action,
         ScreenState(SCREEN_EDIT_WB, {"mode": "delete"}),
     )
-    base = WB_DELETE_CONFIRM_TEXT if not prompt else f"{WB_DELETE_CONFIRM_TEXT}\n\n{prompt}"
+    base_text = wb_delete_confirm_text()
+    base = base_text if not prompt else f"{base_text}\n\n{prompt}"
     return await card_manager.render(
         bot,
         chat_id,
@@ -540,7 +489,8 @@ async def render_company_delete_confirm(
         nav_action,
         ScreenState(SCREEN_EDIT_COMPANY, {"mode": "delete"}),
     )
-    text = COMPANY_DELETE_CONFIRM_TEXT if not prompt else f"{COMPANY_DELETE_CONFIRM_TEXT}\n\n{prompt}"
+    base = company_delete_confirm_text()
+    text = base if not prompt else f"{base}\n\n{prompt}"
     return await card_manager.render(
         bot,
         chat_id,
@@ -561,7 +511,7 @@ async def render_edit_email(
     prompt: str | None = None,
 ) -> int:
     await _apply_nav(state, nav_action, ScreenState(SCREEN_EDIT_EMAIL))
-    base = EMAIL_CODE_TEXT.format(email=email or "указанный адрес") if await_code else EMAIL_REQUEST_TEXT
+    base = email_code_prompt(email or "указанный адрес") if await_code else email_prompt_text()
     if prompt:
         base = f"{base}\n\n{prompt}"
     return await card_manager.render(bot, chat_id, base, reply_markup=kb_edit_email(), state=state)
@@ -577,8 +527,7 @@ async def render_email_menu(
 ) -> int:
     await _apply_nav(state, nav_action, ScreenState(SCREEN_EDIT_EMAIL, {"mode": "menu"}))
     email = profile.email or "—"
-    status = "подтверждена ✅" if profile.email_verified else "не подтверждена ❌"
-    text = EMAIL_MENU_TEMPLATE.format(email=email, status=status)
+    text = email_menu_text(email, profile.email_verified)
     return await card_manager.render(
         bot,
         chat_id,
@@ -597,7 +546,8 @@ async def render_email_unlink_confirm(
     prompt: str | None = None,
 ) -> int:
     await _apply_nav(state, nav_action, ScreenState(SCREEN_EDIT_EMAIL, {"mode": "unlink"}))
-    text = EMAIL_UNLINK_TEXT if not prompt else f"{EMAIL_UNLINK_TEXT}\n\n{prompt}"
+    base = email_unlink_confirm_text()
+    text = base if not prompt else f"{base}\n\n{prompt}"
     return await card_manager.render(
         bot,
         chat_id,

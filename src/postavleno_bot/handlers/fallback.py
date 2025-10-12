@@ -20,7 +20,7 @@ from ..navigation import (
     SCREEN_REGISTER,
     nav_back,
 )
-from ..state import EditCompanyState, EditEmailState, EditWBState, LoginStates, RegisterStates
+from ..state import CompanyStates, EmailStates, LoginStates, RegisterStates, WbStates
 from .pages import (
     render_company_delete_confirm,
     render_company_menu,
@@ -37,6 +37,8 @@ from .pages import (
     render_register,
     render_require_auth,
     render_unknown,
+    render_wb_delete_confirm,
+    render_wb_menu,
 )
 from .utils import delete_user_message, load_active_profile
 
@@ -118,7 +120,7 @@ async def repeat_previous(callback: CallbackQuery, state: FSMContext) -> None:
             await state.set_state(None)
             await render_company_delete_confirm(callback.bot, state, callback.message.chat.id, nav_action="replace")
         else:
-            await state.set_state(EditCompanyState.await_name)
+            await state.set_state(CompanyStates.waiting_name)
             await render_company_prompt(
                 callback.bot,
                 state,
@@ -127,8 +129,25 @@ async def repeat_previous(callback: CallbackQuery, state: FSMContext) -> None:
                 rename=bool(previous.params.get("rename")),
             )
     elif previous.name == SCREEN_EDIT_WB:
-        await state.set_state(EditWBState.await_token)
-        await render_edit_wb(callback.bot, state, callback.message.chat.id, nav_action="replace")
+        mode = previous.params.get("mode")
+        if mode == "menu":
+            if not profile:
+                await render_require_auth(callback.bot, state, callback.message.chat.id, nav_action="replace")
+            else:
+                await state.set_state(None)
+                await render_wb_menu(
+                    callback.bot,
+                    state,
+                    callback.message.chat.id,
+                    profile=profile,
+                    nav_action="replace",
+                )
+        elif mode == "delete":
+            await state.set_state(None)
+            await render_wb_delete_confirm(callback.bot, state, callback.message.chat.id, nav_action="replace")
+        else:
+            await state.set_state(WbStates.waiting_token)
+            await render_edit_wb(callback.bot, state, callback.message.chat.id, nav_action="replace")
     elif previous.name == SCREEN_EDIT_EMAIL:
         mode = previous.params.get("mode")
         if mode == "menu":
@@ -147,7 +166,7 @@ async def repeat_previous(callback: CallbackQuery, state: FSMContext) -> None:
             await state.set_state(None)
             await render_email_unlink_confirm(callback.bot, state, callback.message.chat.id, nav_action="replace")
         else:
-            await state.set_state(EditEmailState.await_email)
+            await state.set_state(EmailStates.waiting_email)
             await render_edit_email(callback.bot, state, callback.message.chat.id, nav_action="replace")
     elif previous.name in {SCREEN_EXPORT_STATUS, SCREEN_EXPORT_DONE}:
         await render_home(

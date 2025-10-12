@@ -3,6 +3,11 @@ from __future__ import annotations
 import asyncio
 import os
 
+try:  # pragma: no cover - optional dependency
+    import uvloop  # type: ignore
+except Exception:  # pragma: no cover - graceful fallback
+    uvloop = None
+
 from .app import create_bot, create_dispatcher
 from .core.config import get_settings
 from .core.logging import get_logger, setup_logging
@@ -30,4 +35,6 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
+    if uvloop is not None:  # pragma: no branch
+        uvloop.install()
     asyncio.run(main())

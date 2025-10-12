@@ -55,7 +55,7 @@ async def _handle_export(
     if callback.message is None:
         return
 
-    await callback.answer("Готовлю файл…")
+    await callback.answer("⌛ Формирую файл…")
     await state.set_state(None)
 
     profile = await load_active_profile(state)
@@ -73,8 +73,13 @@ async def _handle_export(
 
     await render_export_progress(bot, state, chat_id, kind=kind, nav_action="push")
 
+    data = await state.get_data()
+    skip_cache = bool(data.get("skip_export_cache"))
+    if skip_cache:
+        await state.update_data(skip_export_cache=False)
+
     try:
-        result: ExportResult = await exporter(profile.username, token)
+        result: ExportResult = await exporter(profile.username, token, bypass_cache=skip_cache)
     except Exception as exc:  # pragma: no cover - defensive
         _logger.exception("export failed", kind=kind, error=str(exc))
         _export_logger.error(

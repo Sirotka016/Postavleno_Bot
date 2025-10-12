@@ -1,24 +1,146 @@
-"""Handlers for email verification flow."""
+"""Handlers for the email binding flow."""
 
 from __future__ import annotations
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, Message
 
 from ..core.logging import get_logger
 from ..domain import validate_email
+from ..services.accounts import get_accounts_repo
 from ..services.email_verification import start_email_verification, verify_email_code
-from ..state import EditEmailState
-from .pages import render_edit_email, render_profile, render_require_auth
+from ..state import EmailStates
+from .pages import (
+    render_edit_email,
+    render_email_menu,
+    render_email_unlink_confirm,
+    render_profile,
+    render_require_auth,
+)
 from .utils import delete_user_message, load_active_profile
 
 router = Router()
 
-_logger = get_logger(__name__).bind(handler="email")
+logger = get_logger(__name__).bind(handler="email")
 
 
-@router.message(EditEmailState.await_email)
+async def _ensure_profile(callback: CallbackQuery, state: FSMContext):
+    profile = await load_active_profile(state)
+    if not profile:
+        await render_require_auth(callback.bot, state, callback.message.chat.id, nav_action="replace")
+    return profile
+
+
+@router.callback_query(F.data == "email.open")
+async def open_email(callback: CallbackQuery, state: FSMContext) -> None:
+    if callback.message is None:
+        return
+
+    await callback.answer()
+    profile = await _ensure_profile(callback, state)
+    if not profile:
+        return
+
+    await state.set_state(None)
+    if not profile.email:
+        await state.set_state(EmailStates.waiting_email)
+        await render_edit_email(callback.bot, state, callback.message.chat.id, nav_action="push")
+        return
+
+    await render_email_menu(
+        callback.bot,
+        state,
+        callback.message.chat.id,
+        profile=profile,
+        nav_action="push",
+    )
+
+
+@router.callback_query(F.data == "email.change")
+async def change_email(callback: CallbackQuery, state: FSMContext) -> None:
+    if callback.message is None:
+        return
+
+    await callback.answer()
+    profile = await _ensure_profile(callback, state)
+    if not profile:
+        return
+
+    await state.set_state(EmailStates.waiting_email)
+    await render_edit_email(callback.bot, state, callback.message.chat.id, nav_action="replace")
+
+
+@router.callback_query(F.data == "email.unlink_confirm")
+async def unlink_prompt(callback: CallbackQuery, state: FSMContext) -> None:
+    if callback.message is None:
+        return
+
+    await callback.answer()
+    profile = await _ensure_profile(callback, state)
+    if not profile:
+        return
+
+    await state.set_state(None)
+    await render_email_unlink_confirm(callback.bot, state, callback.message.chat.id, nav_action="replace")
+
+
+@router.callback_query(F.data == "email.unlink_no")
+async def cancel_unlink(callback: CallbackQuery, state: FSMContext) -> None:
+    if callback.message is None:
+        return
+
+    await callback.answer()
+    profile = await _ensure_profile(callback, state)
+    if not profile:
+        return
+
+    if not profile.email:
+        await state.set_state(EmailStates.waiting_email)
+        await render_edit_email(callback.bot, state, callback.message.chat.id, nav_action="replace")
+        return
+
+    await state.set_state(None)
+    await render_email_menu(
+        callback.bot,
+        state,
+        callback.message.chat.id,
+        profile=profile,
+        nav_action="replace",
+    )
+
+
+@router.callback_query(F.data == "email.unlink_yes")
+async def confirm_unlink(callback: CallbackQuery, state: FSMContext) -> None:
+    if callback.message is None:
+        return
+
+    await callback.answer()
+    profile = await _ensure_profile(callback, state)
+    if not profile:
+        return
+
+    repo = get_accounts_repo()
+    updated = repo.update_fields(
+        profile.username,
+        email=None,
+        email_verified=False,
+        email_pending_hash=None,
+        email_pending_expires_at=None,
+    )
+
+    await state.set_state(None)
+    await render_profile(
+        callback.bot,
+        state,
+        callback.message.chat.id,
+        updated,
+        nav_action="replace",
+        extra="Почта отвязана ✅",
+    )
+
+
+@router.message(EmailStates.waiting_email)
 async def handle_email_input(message: Message, state: FSMContext) -> None:
     await delete_user_message(message)
     email = (message.text or "").strip()
@@ -40,7 +162,7 @@ async def handle_email_input(message: Message, state: FSMContext) -> None:
     try:
         updated = await start_email_verification(profile, email)
     except Exception as exc:  # pragma: no cover - defensive
-        _logger.exception("failed to send verification email", error=str(exc))
+        logger.exception("failed to send verification email", error=str(exc))
         await render_edit_email(
             message.bot,
             state,
@@ -54,7 +176,7 @@ async def handle_email_input(message: Message, state: FSMContext) -> None:
         )
         return
 
-    await state.set_state(EditEmailState.await_code)
+    await state.set_state(EmailStates.waiting_code)
     await render_edit_email(
         message.bot,
         state,
@@ -66,7 +188,7 @@ async def handle_email_input(message: Message, state: FSMContext) -> None:
     )
 
 
-@router.message(EditEmailState.await_code)
+@router.message(EmailStates.waiting_code)
 async def handle_code_input(message: Message, state: FSMContext) -> None:
     await delete_user_message(message)
     code = (message.text or "").strip()

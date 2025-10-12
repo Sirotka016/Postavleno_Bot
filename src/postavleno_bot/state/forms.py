@@ -15,14 +15,14 @@ class RegisterStates(StatesGroup):
     await_password = State()
 
 
-class EditWBState(StatesGroup):
-    await_token = State()
+class CompanyStates(StatesGroup):
+    waiting_name = State()
 
 
-class EditCompanyState(StatesGroup):
-    await_name = State()
+class EmailStates(StatesGroup):
+    waiting_email = State()
+    waiting_code = State()
 
 
-class EditEmailState(StatesGroup):
-    await_email = State()
-    await_code = State()
+class WbStates(StatesGroup):
+    waiting_token = State()

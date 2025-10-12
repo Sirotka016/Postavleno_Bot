@@ -21,10 +21,10 @@ def test_home_menu_order_for_authenticated_user() -> None:
 def test_profile_menu_structure() -> None:
     texts = extract_texts(kb_profile())
     assert texts == [
-        "🏢 Компания",
+        "📁 Компания",
         "✉️ Почта",
         "🔑 WB API",
-        "🚪 Выйти из профиля",
+        "📒 Выйти из профиля",
         "🗑️ Удалить аккаунт",
         "🔄 Обновить",
         "◀️ Назад",
