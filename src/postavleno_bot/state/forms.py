@@ -21,3 +21,7 @@ class EditWBState(StatesGroup):
 
 class EditMSState(StatesGroup):
     await_token = State()
+
+
+class EditCompanyState(StatesGroup):
+    await_name = State()
