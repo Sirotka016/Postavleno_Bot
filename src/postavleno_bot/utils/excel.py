@@ -48,38 +48,18 @@ def _clean_int_series(series: pd.Series) -> pd.Series:
     return numeric.astype(int)
 
 
-def _most_common_str(series: pd.Series) -> str:
-    cleaned = series.dropna().astype(str).str.strip()
-    cleaned = cleaned[cleaned != ""]
+def _most_common(series: pd.Series, *, drop_blank: bool = False) -> object:
+    cleaned = series.dropna()
+    if drop_blank:
+        cleaned = cleaned.astype(str).str.strip()
+        cleaned = cleaned[cleaned != ""]
     if cleaned.empty:
-        return ""
-    return str(cleaned.value_counts().idxmax())
-
-
-def _most_common_int(series: pd.Series) -> int:
-    numeric = pd.to_numeric(series, errors="coerce").dropna()
-    if numeric.empty:
-        return 0
-    return int(numeric.value_counts().idxmax())
+        return None
+    return cleaned.value_counts().index[0]
 
 
 def wb_to_df_all(items: list[dict[str, object]]) -> pd.DataFrame:
-    columns = [
-        "supplierArticle",
-        "nmId",
-        "barcode",
-        "quantity",
-        "inWayToClient",
-        "inWayFromClient",
-        "quantityFull",
-    ]
-    records: list[dict[str, object]] = []
-    for payload in items:
-        if not isinstance(payload, dict):
-            payload = {}
-        records.append({key: payload.get(key) for key in columns})
-
-    df = pd.DataFrame(records, columns=columns)
+    df = pd.DataFrame(items)
     if df.empty:
         return pd.DataFrame(
             columns=[
@@ -93,44 +73,63 @@ def wb_to_df_all(items: list[dict[str, object]]) -> pd.DataFrame:
             ]
         )
 
-    for column in ["supplierArticle", "barcode"]:
+    defaults = {
+        "supplierArticle": "",
+        "nmId": None,
+        "barcode": "",
+        "quantity": 0,
+        "inWayToClient": 0,
+        "inWayFromClient": 0,
+        "quantityFull": 0,
+    }
+    for column, default in defaults.items():
         if column not in df:
-            df[column] = ""
-    for column in ["nmId", "quantity", "inWayToClient", "inWayFromClient", "quantityFull"]:
-        if column not in df:
-            df[column] = 0
+            df[column] = default
 
     df["supplierArticle"] = _clean_str_series(df["supplierArticle"])
+    df = df[df["supplierArticle"] != ""]
+    if df.empty:
+        return pd.DataFrame(
+            columns=[
+                "Артикул поставщика",
+                "nmId",
+                "Штрихкод",
+                "Кол-во",
+                "В пути к клиенту",
+                "Возврат от клиента",
+                "Итого",
+            ]
+        )
     df["barcode"] = _clean_str_series(df["barcode"])
     df["nmId"] = pd.to_numeric(df["nmId"], errors="coerce")
+
     for numeric in ["quantity", "inWayToClient", "inWayFromClient", "quantityFull"]:
         df[numeric] = pd.to_numeric(df[numeric], errors="coerce").fillna(0)
 
-    aggregated = (
-        df.groupby("supplierArticle", as_index=False)
+    aggregation = (
+        df.groupby("supplierArticle")
         .agg(
-            nmId=("nmId", _most_common_int),
-            barcode=("barcode", _most_common_str),
+            nmId=("nmId", lambda s: _most_common(s)),
+            barcode=("barcode", lambda s: _most_common(s, drop_blank=True)),
             quantity=("quantity", "sum"),
             inWayToClient=("inWayToClient", "sum"),
             inWayFromClient=("inWayFromClient", "sum"),
             quantityFull=("quantityFull", "sum"),
         )
-        .rename(
-            columns={
-                "supplierArticle": "Артикул поставщика",
-                "barcode": "Штрихкод",
-                "quantity": "Кол-во",
-                "inWayToClient": "В пути к клиенту",
-                "inWayFromClient": "Возврат от клиента",
-                "quantityFull": "Итого",
-            }
-        )
+        .reset_index()
     )
 
-    for column in ["Кол-во", "В пути к клиенту", "Возврат от клиента", "Итого"]:
-        aggregated[column] = pd.to_numeric(aggregated[column], errors="coerce").fillna(0).astype(int)
-    aggregated["nmId"] = pd.to_numeric(aggregated["nmId"], errors="coerce").fillna(0).astype(int)
+    aggregation = aggregation.rename(
+        columns={
+            "supplierArticle": "Артикул поставщика",
+            "nmId": "nmId",
+            "barcode": "Штрихкод",
+            "quantity": "Кол-во",
+            "inWayToClient": "В пути к клиенту",
+            "inWayFromClient": "Возврат от клиента",
+            "quantityFull": "Итого",
+        }
+    )
 
     ordered_columns = [
         "Артикул поставщика",
@@ -141,7 +140,8 @@ def wb_to_df_all(items: list[dict[str, object]]) -> pd.DataFrame:
         "Возврат от клиента",
         "Итого",
     ]
-    return aggregated[ordered_columns].sort_values("Артикул поставщика", kind="stable").reset_index(drop=True)
+    aggregation = aggregation[ordered_columns]
+    return aggregation.sort_values("Артикул поставщика", kind="stable").reset_index(drop=True)
 
 
 def wb_to_df_bywh(items: list[dict[str, object]]) -> pd.DataFrame:

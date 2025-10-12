@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from email.message import EmailMessage
 
-from aiosmtplib import SMTP
+from aiosmtplib import SMTP, SMTPException
 
 
 async def send_email(
@@ -30,8 +30,10 @@ async def send_email(
     smtp = SMTP(hostname=host, port=port, start_tls=True, timeout=timeout)
     await smtp.connect()
     try:
-        await smtp.starttls()
         await smtp.login(username, password)
         await smtp.send_message(message)
     finally:  # pragma: no cover - network cleanup
-        await smtp.quit()
+        try:
+            await smtp.quit()
+        except SMTPException:
+            pass
