@@ -40,10 +40,10 @@ def _summary_for_result(kind: str, result: ExportResult) -> str:
     created = _format_created(result.created_at)
     if kind == "wb_by_wh":
         warehouses = int(result.metadata.get("warehouses", 0))
-        return f"Складов: {warehouses}, строк: {result.rows}\nСоздан: {created}"
+        return f"Складов {warehouses}, строк {result.rows} ({created})"
     if kind == "ms_all":
-        return f"Позиции: {result.rows}\nСоздан: {created}"
-    return f"Строк: {result.rows}\nСоздан: {created}"
+        return f"Позиций {result.rows} ({created})"
+    return f"Строк {result.rows} ({created})"
 
 
 async def _handle_export(
@@ -106,13 +106,12 @@ async def _handle_export(
         await render_export_error(bot, state, chat_id, kind=kind, nav_action="replace")
         return
 
-    summary = _summary_for_result(kind, result)
+    await callback.answer(_summary_for_result(kind, result))
     await render_export_ready(
         bot,
         state,
         chat_id,
         kind=kind,
-        summary=summary,
         nav_action="replace",
     )
 

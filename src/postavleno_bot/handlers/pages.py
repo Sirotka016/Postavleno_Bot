@@ -50,47 +50,42 @@ from ..ui import (
 
 GUEST_HOME_TEXT = (
     "Привет! Я Postavleno_Bot 👋\n"
-    "Помогаю работать с Wildberries и МойСклад. Начнём с входа в аккаунт.\n\n"
-    "Выберите действие:\n"
-    "• Авторизация — войти в существующий аккаунт\n"
-    "• Регистрация — создать новый"
+    "Помогаю работать с Wildberries и МойСклад.\n\n"
+    "Чтобы продолжить, выберите действие ниже."
 )
 
 AUTH_HOME_TEMPLATE = (
-    "Добро пожаловать, {name}!\n\n"
-    "Статус интеграций:\n"
+    "Рада видеть вас, {name}! ✨\n\n"
+    "Интеграции:\n"
     "• WB API: {wb}\n"
     "• МойСклад API: {ms}\n\n"
-    "Откройте профиль, чтобы изменить данные."
+    "Профиль поможет обновить данные и запустить экспорт."
 )
 
-EXPORT_PROGRESS_TEXT = "Готовлю файл… это может занять до минуты ⏳"
-EXPORT_READY_TEMPLATE = "Готово ✅\n{summary}"
+EXPORT_PROGRESS_TEXT = "Собираю данные…"
+EXPORT_READY_TEMPLATE = "Готово ✅"
 EXPORT_MISSING_TEMPLATE = "Добавьте ключи в профиле."
-EXPORT_ERROR_TEXT = "Не получилось собрать файл 😕 Попробуйте ещё раз или зайдите чуть позже."
+EXPORT_ERROR_TEXT = "Не удалось собрать файл. Попробуйте чуть позже."
 
-REQUIRE_AUTH_TEXT = "Требуется авторизация."
+REQUIRE_AUTH_TEXT = "Нужно авторизоваться. Выберите действие ниже."
 
-LOGIN_TEXT = "🔑 Вход в аккаунт\n\nВведите логин."
-LOGIN_PASSWORD_TEXT = "🔑 Вход в аккаунт\n\nВведите пароль."
+LOGIN_TEXT = "🔑 Авторизация\n\nВведите логин."
+LOGIN_PASSWORD_TEXT = "🔑 Авторизация\n\nЛогин принят. Введите пароль."
 REGISTER_TEXT = (
     "🆕 Регистрация\n\n"
     "Придумайте логин: латиница, цифры, точка, дефис, подчёркивание (3–32)."
 )
-REGISTER_PASSWORD_TEXT = "🆕 Регистрация\n\nВведите пароль (≥ 6 символов)."
-EDIT_COMPANY_TEXT = "🏢 Название компании\n\nВведите новое название (2–64 символа)."
-EDIT_WB_TEXT = "🔧 Смена WB API ключа\n\nОтправьте новый ключ."
-EDIT_MS_TEXT = "🔧 Смена «Мой Склад» API ключа\n\nОтправьте новый ключ."
-EDIT_EMAIL_TEXT = "📧 Почта\n\nСкоро здесь появится подтверждение email."
+REGISTER_PASSWORD_TEXT = "🆕 Регистрация\n\nЛогин принят. Введите пароль (≥ 6 символов)."
+EDIT_COMPANY_TEXT = "🏢 Смена названия компании\n\nВведите новое название (1–60 символов)."
+EDIT_WB_TEXT = "🔑 Смена WB API\n\nОтправьте новый ключ."
+EDIT_MS_TEXT = "🔑 Смена «Мой Склад» API\n\nОтправьте новый ключ."
+EDIT_EMAIL_TEXT = "✉️ Смена почты\n\nСкоро появится подтверждение email."
 LOGIN_ERROR_TEXT = "Аккаунт не найден."
 REGISTER_TAKEN_TEXT = "Логин занят, придумайте другой."
-SUCCESS_SAVED = "Сохранено."
-UNKNOWN_TEXT = "Не понял запрос 🤔\nВыберите, что сделать дальше."
+UNKNOWN_TEXT = "Не понял запрос 🤔 Выберите действие ниже."
 
 DELETE_CONFIRM_TEXT = (
-    "Удаление аккаунта\n\n"
-    "Это действие навсегда удалит ваш аккаунт и все связанные данные на этом компьютере. Отменить нельзя.\n\n"
-    "Вы уверены?"
+    "Удалить аккаунт навсегда? Данные на диске будут стерты. Это действие нельзя отменить."
 )
 
 DELETE_ERROR_TEXT = "Не удалось удалить аккаунт. Попробуйте позже."
@@ -123,8 +118,8 @@ async def render_home(
         name = profile.company_name or profile.display_login
         text = AUTH_HOME_TEMPLATE.format(
             name=name,
-            wb="✅" if profile.wb_api else "—",
-            ms="✅" if profile.ms_api else "—",
+            wb="✅" if profile.wb_api else "❌",
+            ms="✅" if profile.ms_api else "❌",
         )
         if extra:
             text = f"{text}\n\n{extra}"
@@ -167,10 +162,8 @@ async def render_export_missing_token(
         nav_action,
         ScreenState(SCREEN_EXPORT_STATUS, {"service": service, "status": "missing"}),
     )
-    if service.upper() == "MS":
-        text = EXPORT_MISSING_TEMPLATE
-    else:
-        text = f"Не хватает ключа {service}. {EXPORT_MISSING_TEMPLATE}"
+    service_name = "МойСклад" if service.upper() == "MS" else "WB"
+    text = f"Не хватает ключа {service_name}. {EXPORT_MISSING_TEMPLATE}"
     return await card_manager.render(
         bot,
         chat_id,
@@ -208,7 +201,6 @@ async def render_export_ready(
     chat_id: int,
     *,
     kind: str,
-    summary: str,
     nav_action: str = "replace",
 ) -> int:
     await _apply_nav(
@@ -216,11 +208,10 @@ async def render_export_ready(
         nav_action,
         ScreenState(SCREEN_EXPORT_DONE, {"kind": kind, "status": "done"}),
     )
-    text = EXPORT_READY_TEMPLATE.format(summary=summary)
     return await card_manager.render(
         bot,
         chat_id,
-        text,
+        EXPORT_READY_TEMPLATE,
         reply_markup=kb_export_ready(),
         state=state,
     )
@@ -349,8 +340,8 @@ async def render_profile(
     extra: str | None = None,
 ) -> int:
     await _apply_nav(state, nav_action, ScreenState(SCREEN_PROFILE))
-    wb_state = "✅" if profile.wb_api else "—"
-    ms_state = "✅" if profile.ms_api else "—"
+    wb_state = "✅" if profile.wb_api else "❌"
+    ms_state = "✅" if profile.ms_api else "❌"
     email = profile.email or "—"
     company = profile.company_name or profile.display_login
     lines = [
@@ -359,7 +350,6 @@ async def render_profile(
         f"Компания: {company}",
         f"Логин: {profile.display_login}",
         f"Дата регистрации: {_format_datetime(profile.created_at)}",
-        "",
         f"Почта: {email}",
         f"WB API: {wb_state}",
         f"МойСклад API: {ms_state}",

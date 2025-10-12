@@ -153,7 +153,7 @@ async def handle_delete_confirm(callback: CallbackQuery, state: FSMContext) -> N
 
     logger.info("Account deleted successfully")
     audit_log.info("account delete succeeded", result="success", reason=None)
-    await callback.answer("Аккаунт удалён. Вы можете создать новый в любое время.")
+    await callback.answer("Аккаунт удалён. Можете зарегистрироваться заново.")
     await state.set_state(None)
     await render_home(
         callback.bot,

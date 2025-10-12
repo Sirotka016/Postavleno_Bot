@@ -72,4 +72,11 @@ async def handle_password_input(message: Message, state: FSMContext) -> None:
     await set_auth_user(state, profile.username)
     await state.set_state(None)
     await state.update_data(login_candidate=None, login_normalized=None)
-    await render_profile(message.bot, state, message.chat.id, profile, nav_action="replace")
+    await render_profile(
+        message.bot,
+        state,
+        message.chat.id,
+        profile,
+        nav_action="replace",
+        extra="Авторизация выполнена ✅",
+    )

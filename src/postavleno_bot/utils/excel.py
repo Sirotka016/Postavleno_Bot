@@ -3,15 +3,32 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Mapping
 
 import pandas as pd
+from openpyxl.styles import Font
+from openpyxl.utils import get_column_letter
 
 
 def save_df_xlsx(df: pd.DataFrame, path: Path) -> Path:
+    """Persist *df* to *path* with basic styling applied."""
+
     path.parent.mkdir(parents=True, exist_ok=True)
+    sheet_name = "Остатки"
     with pd.ExcelWriter(path, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False)
+        df.to_excel(writer, sheet_name=sheet_name, index=False)
+        worksheet = writer.sheets[sheet_name]
+        worksheet.freeze_panes = "A2"
+        header_font = Font(bold=True)
+        for cell in worksheet[1]:
+            cell.font = header_font
+        for idx, column_cells in enumerate(worksheet.columns, start=1):
+            column_letter = get_column_letter(idx)
+            max_length = 0
+            for cell in column_cells:
+                value = "" if cell.value is None else str(cell.value)
+                max_length = max(max_length, len(value))
+            worksheet.column_dimensions[column_letter].width = min(max_length + 2, 80)
     return path
 
 
@@ -33,113 +50,76 @@ def _clean_int_series(series: pd.Series) -> pd.Series:
 
 def wb_to_df_all(items: list[dict[str, object]]) -> pd.DataFrame:
     columns = [
-        ("supplierArticle", "Артикул"),
-        ("nmId", "nmId"),
-        ("barcode", "ШК"),
-        ("quantity", "На складе"),
-        ("inWayToClient", "В пути к клиенту"),
-        ("inWayFromClient", "Возврат от клиента"),
-        ("quantityFull", "Доступно (итого)"),
+        ("supplierArticle", "Артикул поставщика", _clean_str_series),
+        ("nmId", "nmId", _clean_int_series),
+        ("barcode", "Штрихкод", _clean_str_series),
+        ("quantity", "Кол-во", _clean_int_series),
+        ("inWayToClient", "В пути к клиенту", _clean_int_series),
+        ("inWayFromClient", "Возврат от клиента", _clean_int_series),
+        ("quantityFull", "Итого", _clean_int_series),
     ]
     records: list[dict[str, object]] = []
     for payload in items:
         row: dict[str, object] = {}
-        for source, header in columns:
-            value = payload.get(source) if isinstance(payload, dict) else None
-            row[header] = value
+        if not isinstance(payload, dict):
+            payload = {}
+        for source, header, _ in columns:
+            row[header] = payload.get(source)
         records.append(row)
 
-    headers = [header for _, header in columns]
+    headers = [header for _, header, _ in columns]
     df = _ensure_dataframe(headers, records)
     if df.empty:
         return df
 
-    df["Артикул"] = _clean_str_series(df["Артикул"])
-    df["nmId"] = _clean_int_series(df["nmId"])
-    df["ШК"] = _clean_str_series(df["ШК"])
+    for _, header, cleaner in columns:
+        df[header] = cleaner(df[header])
 
-    for header in [
-        "На складе",
-        "В пути к клиенту",
-        "Возврат от клиента",
-        "Доступно (итого)",
-    ]:
-        df[header] = _clean_int_series(df[header])
-
-    return df.sort_values(["Артикул", "nmId"], kind="stable").reset_index(drop=True)
+    return df.sort_values(["Артикул поставщика", "nmId"], kind="stable").reset_index(drop=True)
 
 
 def wb_to_df_bywh(items: list[dict[str, object]]) -> pd.DataFrame:
     columns = [
-        ("warehouseName", "Склад"),
-        ("supplierArticle", "Артикул"),
-        ("nmId", "nmId"),
-        ("barcode", "ШК"),
-        ("quantity", "На складе"),
-        ("inWayToClient", "В пути к клиенту"),
-        ("inWayFromClient", "Возврат от клиента"),
-        ("quantityFull", "Доступно (итого)"),
+        ("warehouseName", "Склад", _clean_str_series),
+        ("supplierArticle", "Артикул поставщика", _clean_str_series),
+        ("nmId", "nmId", _clean_int_series),
+        ("barcode", "Штрихкод", _clean_str_series),
+        ("quantity", "Кол-во", _clean_int_series),
+        ("inWayToClient", "В пути к клиенту", _clean_int_series),
+        ("inWayFromClient", "Возврат от клиента", _clean_int_series),
+        ("quantityFull", "Итого", _clean_int_series),
     ]
     records: list[dict[str, object]] = []
     for payload in items:
         row: dict[str, object] = {}
-        for source, header in columns:
-            value = payload.get(source) if isinstance(payload, dict) else None
-            row[header] = value
+        if not isinstance(payload, dict):
+            payload = {}
+        for source, header, _ in columns:
+            row[header] = payload.get(source)
         records.append(row)
 
-    headers = [header for _, header in columns]
+    headers = [header for _, header, _ in columns]
     df = _ensure_dataframe(headers, records)
     if df.empty:
         return df
 
-    df["Склад"] = _clean_str_series(df["Склад"])
-    df["Артикул"] = _clean_str_series(df["Артикул"])
-    df["nmId"] = _clean_int_series(df["nmId"])
-    df["ШК"] = _clean_str_series(df["ШК"])
+    for _, header, cleaner in columns:
+        df[header] = cleaner(df[header])
 
-    for header in [
-        "На складе",
-        "В пути к клиенту",
-        "Возврат от клиента",
-        "Доступно (итого)",
-    ]:
-        df[header] = _clean_int_series(df[header])
-
-    return df.sort_values(["Склад", "Артикул", "nmId"], kind="stable").reset_index(drop=True)
+    return df.sort_values(["Склад", "Артикул поставщика", "nmId"], kind="stable").reset_index(drop=True)
 
 
 def ms_to_df_all(payload: dict[str, object] | None) -> pd.DataFrame:
-    rows = []
-    if isinstance(payload, dict):
-        raw_rows = payload.get("rows")
-        if isinstance(raw_rows, list):
-            for entry in raw_rows:
-                if not isinstance(entry, dict):
-                    continue
-                rows.append(
-                    {
-                        "Артикул": entry.get("article"),
-                        "Наименование": entry.get("name"),
-                        "Остаток": entry.get("stock"),
-                        "Резерв": entry.get("reserve"),
-                        "Ожидание": entry.get("inTransit"),
-                        "Доступно": entry.get("quantity"),
-                    }
-                )
-
-    headers = ["Артикул", "Наименование", "Остаток", "Резерв", "Ожидание", "Доступно"]
-    df = _ensure_dataframe(headers, rows)
-    if df.empty:
-        return df
-
-    df["Артикул"] = _clean_str_series(df["Артикул"])
-    df["Наименование"] = _clean_str_series(df["Наименование"])
-
-    for header in ["Остаток", "Резерв", "Ожидание", "Доступно"]:
-        df[header] = _clean_int_series(df[header])
-
-    return df.sort_values(["Артикул", "Наименование"], kind="stable").reset_index(drop=True)
+    if not isinstance(payload, Mapping):
+        return pd.DataFrame()
+    raw_rows = payload.get("rows")
+    if not isinstance(raw_rows, list) or not raw_rows:
+        return pd.DataFrame()
+    normalized_rows = [row for row in raw_rows if isinstance(row, Mapping)]
+    if not normalized_rows:
+        return pd.DataFrame()
+    df = pd.json_normalize(normalized_rows)
+    return df
 
 
 __all__ = [
