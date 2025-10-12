@@ -64,14 +64,35 @@ def kb_register() -> InlineKeyboardMarkup:
 def kb_profile() -> InlineKeyboardMarkup:
     return _build(
         [
-            [("🏢 Название компании", "profile.company")],
+            [("🏢 Компания", "profile.company")],
             [("🔑 WB API", "profile.wb")],
             [("✉️ Почта", "profile.email")],
+            [("🚪 Выйти из профиля", "home.logout")],
             [("🗑️ Удалить аккаунт", "home.delete_open")],
             [("🔄 Обновить", "profile.refresh")],
             [("◀️ Назад", "nav.back")],
-            [("📖 Выйти из профиля", "home.logout")],
             [("✖️ Выйти", "home.exit")],
+        ]
+    )
+
+
+def kb_company_menu() -> InlineKeyboardMarkup:
+    return _build(
+        [
+            [("✏️ Переименовать компанию", "company.rename")],
+            [("🗑️ Удалить компанию", "company.delete")],
+            [("🔄 Обновить", "company.refresh")],
+            [("◀️ Назад", "nav.back")],
+            [("✖️ Выйти", "home.exit")],
+        ]
+    )
+
+
+def kb_company_delete_confirm() -> InlineKeyboardMarkup:
+    return _build(
+        [
+            [("Да", "company.delete.confirm")],
+            [("Нет", "company.delete.cancel")],
         ]
     )
 
@@ -136,6 +157,27 @@ def kb_edit_company() -> InlineKeyboardMarkup:
         [
             [("◀️ Назад", "nav.back")],
             [("✖️ Выйти", "home.exit")],
+        ]
+    )
+
+
+def kb_email_menu() -> InlineKeyboardMarkup:
+    return _build(
+        [
+            [("✏️ Изменить почту", "email.change")],
+            [("🔗 Отвязать почту", "email.unlink")],
+            [("🔄 Обновить", "email.refresh")],
+            [("◀️ Назад", "nav.back")],
+            [("✖️ Выйти", "home.exit")],
+        ]
+    )
+
+
+def kb_email_unlink_confirm() -> InlineKeyboardMarkup:
+    return _build(
+        [
+            [("Да", "email.unlink.confirm")],
+            [("Нет", "email.unlink.cancel")],
         ]
     )
 
