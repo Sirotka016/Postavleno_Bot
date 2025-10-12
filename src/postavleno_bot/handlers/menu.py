@@ -12,7 +12,6 @@ from aiogram.types import CallbackQuery, FSInputFile
 from ..core.logging import get_logger
 from ..services.exports import (
     ExportResult,
-    export_ms_stocks_all,
     export_wb_stocks_all,
     export_wb_stocks_by_warehouse,
 )
@@ -41,8 +40,6 @@ def _summary_for_result(kind: str, result: ExportResult) -> str:
     if kind == "wb_by_wh":
         warehouses = int(result.metadata.get("warehouses", 0))
         return f"Складов {warehouses}, строк {result.rows} ({created})"
-    if kind == "ms_all":
-        return f"Позиций {result.rows} ({created})"
     return f"Строк {result.rows} ({created})"
 
 
@@ -137,18 +134,6 @@ async def handle_wb_by_warehouse(callback: CallbackQuery, state: FSMContext) -> 
         token_attr="wb_api",
         service_label="WB",
         exporter=export_wb_stocks_by_warehouse,
-    )
-
-
-@router.callback_query(F.data == "stocks_ms_all")
-async def handle_ms_all(callback: CallbackQuery, state: FSMContext) -> None:
-    await _handle_export(
-        callback,
-        state,
-        kind="ms_all",
-        token_attr="ms_api",
-        service_label="MS",
-        exporter=export_ms_stocks_all,
     )
 
 

@@ -8,3 +8,4 @@ pandas>=2.2
 openpyxl>=3.1
 bcrypt>=4.1
 orjson>=3.10,<4.0
+aiosmtplib>=2.0

@@ -17,7 +17,6 @@ from ..core.config import get_settings
 from ..core.logging import get_logger
 
 _WB_BASE_URL = "https://statistics-api.wildberries.ru"
-_MS_BASE_URL = "https://api.moysklad.ru/api/remap/1.2"
 
 
 def create_wb_client(*, headers: dict[str, str] | None = None) -> httpx.AsyncClient:
@@ -35,30 +34,6 @@ def create_wb_client(*, headers: dict[str, str] | None = None) -> httpx.AsyncCli
     )
     client._postavleno_timeout = settings.http_timeout_s  # type: ignore[attr-defined]
     return client
-
-
-def create_ms_client(*, headers: dict[str, str] | None = None) -> httpx.AsyncClient:
-    """Return a configured AsyncClient for MoySklad API."""
-
-    settings = get_settings()
-    base_headers = {
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-        "Accept-Encoding": "gzip",
-        "User-Agent": "PostavlenoBot/1.0",
-    }
-    if headers:
-        base_headers.update(headers)
-    client = httpx.AsyncClient(
-        base_url=_MS_BASE_URL,
-        headers=base_headers,
-        http2=HTTP2_AVAILABLE,
-        timeout=settings.http_timeout_s,
-    )
-    client._postavleno_timeout = settings.http_timeout_s  # type: ignore[attr-defined]
-    return client
-
-
 async def request_with_retry(
     client: httpx.AsyncClient,
     *,

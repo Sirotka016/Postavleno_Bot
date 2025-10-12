@@ -6,13 +6,12 @@ from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
-from ..domain import validate_company_name, validate_ms, validate_wb
+from ..domain import validate_company_name, validate_wb
 from ..services.accounts import get_accounts_repo
-from ..state import EditCompanyState, EditMSState, EditWBState
+from ..state import EditCompanyState, EditEmailState, EditWBState
 from .pages import (
     render_edit_company,
     render_edit_email,
-    render_edit_ms,
     render_edit_wb,
     render_profile,
     render_require_auth,
@@ -60,8 +59,8 @@ async def edit_wb(callback: CallbackQuery, state: FSMContext) -> None:
     await render_edit_wb(callback.bot, state, callback.message.chat.id, nav_action="push")
 
 
-@router.callback_query(F.data == "profile.ms")
-async def edit_ms(callback: CallbackQuery, state: FSMContext) -> None:
+@router.callback_query(F.data == "profile.email")
+async def edit_email(callback: CallbackQuery, state: FSMContext) -> None:
     if callback.message is None:
         return
     await callback.answer()
@@ -69,15 +68,7 @@ async def edit_ms(callback: CallbackQuery, state: FSMContext) -> None:
     if not profile:
         await render_require_auth(callback.bot, state, callback.message.chat.id, nav_action="replace")
         return
-    await state.set_state(EditMSState.await_token)
-    await render_edit_ms(callback.bot, state, callback.message.chat.id, nav_action="push")
-
-
-@router.callback_query(F.data == "profile.email")
-async def edit_email(callback: CallbackQuery, state: FSMContext) -> None:
-    if callback.message is None:
-        return
-    await callback.answer()
+    await state.set_state(EditEmailState.await_email)
     await render_edit_email(callback.bot, state, callback.message.chat.id, nav_action="push")
 
 
@@ -108,36 +99,6 @@ async def handle_wb_token(message: Message, state: FSMContext) -> None:
         updated,
         nav_action="replace",
         extra="Ключ WB обновлён ✅",
-    )
-
-
-@router.message(EditMSState.await_token)
-async def handle_ms_token(message: Message, state: FSMContext) -> None:
-    await delete_user_message(message)
-    token = (message.text or "").strip()
-    if not validate_ms(token):
-        await render_edit_ms(
-            message.bot,
-            state,
-            message.chat.id,
-            nav_action="replace",
-            prompt="Проверьте ключ «Мой Склад»: допустимы латиница, цифры и . _ : / + = - (16–4096).",
-        )
-        return
-    repo = get_accounts_repo()
-    profile = await load_active_profile(state)
-    if not profile:
-        await render_require_auth(message.bot, state, message.chat.id, nav_action="replace")
-        return
-    updated = repo.set_ms_api(profile.username, token)
-    await state.set_state(None)
-    await render_profile(
-        message.bot,
-        state,
-        message.chat.id,
-        updated,
-        nav_action="replace",
-        extra="Ключ «Мой Склад» обновлён ✅",
     )
 
 

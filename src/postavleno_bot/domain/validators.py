@@ -6,7 +6,7 @@ import re
 
 RE_LOGIN = re.compile(r"^[A-Za-z0-9._-]{3,32}$")
 RE_WB = re.compile(r"^[ -~]{32,512}$")
-RE_MS = re.compile(r"^[A-Za-z0-9._:/+=-]{16,4096}$")
+RE_EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 def validate_login(value: str) -> bool:
@@ -21,12 +21,6 @@ def validate_wb(value: str) -> bool:
     return bool(RE_WB.fullmatch(value.strip()))
 
 
-def validate_ms(value: str) -> bool:
-    """Return ``True`` when *value* looks like a MoySklad token."""
-
-    return bool(RE_MS.fullmatch(value.strip()))
-
-
 def validate_company_name(value: str) -> bool:
     """Return ``True`` when *value* looks like a company name (1–60 chars)."""
 
@@ -34,12 +28,18 @@ def validate_company_name(value: str) -> bool:
     return 1 <= len(stripped) <= 60
 
 
+def validate_email(value: str) -> bool:
+    """Return ``True`` when *value* looks like an email address."""
+
+    return bool(RE_EMAIL.fullmatch(value.strip()))
+
+
 __all__ = [
     "validate_company_name",
+    "validate_email",
     "validate_login",
-    "validate_ms",
     "validate_wb",
+    "RE_EMAIL",
     "RE_LOGIN",
-    "RE_MS",
     "RE_WB",
 ]
