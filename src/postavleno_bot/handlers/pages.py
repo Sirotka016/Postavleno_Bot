@@ -13,7 +13,6 @@ from ..navigation import (
     SCREEN_DELETE_CONFIRM,
     SCREEN_EDIT_COMPANY,
     SCREEN_EDIT_EMAIL,
-    SCREEN_EDIT_MS,
     SCREEN_EDIT_WB,
     SCREEN_EXPORT_DONE,
     SCREEN_EXPORT_STATUS,
@@ -35,7 +34,6 @@ from ..ui import (
     kb_delete_error,
     kb_edit_company,
     kb_edit_email,
-    kb_edit_ms,
     kb_edit_wb,
     kb_export_error,
     kb_export_missing_token,
@@ -51,15 +49,14 @@ from ..ui import (
 
 GUEST_HOME_TEXT = (
     "Привет! Я Postavleno_Bot 👋\n"
-    "Помогаю работать с Wildberries и МойСклад.\n\n"
+    "Помогаю работать с Wildberries.\n\n"
     "Чтобы продолжить, выберите действие ниже."
 )
 
 AUTH_HOME_TEMPLATE = (
-    "Рады видеть вас, {name}! ✨\n\n"
+    "Рад(а) видеть вас, {name}! ✨\n\n"
     "Интеграции:\n"
-    "• WB API: {wb}\n"
-    "• МойСклад API: {ms}"
+    "• WB API: {wb}"
 )
 
 EXPORT_PROGRESS_TEXT = "Собираю данные…"
@@ -78,10 +75,17 @@ REGISTER_TEXT = (
     "Придумайте логин: латиница, цифры, точка, дефис, подчёркивание (3–32)."
 )
 REGISTER_PASSWORD_TEXT = "🆕 Регистрация\n\nЛогин принят. Введите пароль (≥ 6 символов)."
-EDIT_COMPANY_TEXT = "🏢 Смена названия компании\n\nВведите новое название (1–60 символов)."
-EDIT_WB_TEXT = "🔑 Смена WB API\n\nОтправьте новый ключ."
-EDIT_MS_TEXT = "🔑 Смена «Мой Склад» API\n\nОтправьте новый ключ."
-EDIT_EMAIL_TEXT = "✉️ Смена почты\n\nСкоро появится подтверждение email."
+EDIT_COMPANY_TEXT = "🏢 Название компании\n\nВведите новое название (1–60 символов)."
+EDIT_WB_TEXT = "🔑 WB API\n\nОтправьте новый ключ."
+EDIT_EMAIL_TEXT = (
+    "✉️ Почта\n\n"
+    "Введите e-mail, чтобы мы отправили код подтверждения."
+)
+EMAIL_CODE_TEXT = (
+    "✉️ Почта\n\n"
+    "Мы отправили код на {email}. Введите 6 цифр из письма.\n"
+    "Если письмо не пришло, проверьте папку «Спам»."
+)
 LOGIN_ERROR_TEXT = "Аккаунт не найден."
 REGISTER_TAKEN_TEXT = "Логин занят, придумайте другой."
 UNKNOWN_TEXT = "Не понял запрос 🤔"
@@ -103,13 +107,10 @@ async def _apply_nav(state: FSMContext, action: str, screen: ScreenState) -> Non
 
 
 def _resolve_home_name(profile: AccountProfile | None, tg_user: User | None) -> str:
-    if tg_user:
-        first_name = (tg_user.first_name or "").strip()
-        if first_name:
-            return first_name
-        username = (tg_user.username or "").strip()
+    if tg_user and tg_user.username:
+        username = tg_user.username.strip()
         if username:
-            return username
+            return f"@{username}"
     if profile:
         return profile.display_login
     return "друг"
@@ -135,7 +136,6 @@ async def render_home(
         text = AUTH_HOME_TEMPLATE.format(
             name=name,
             wb="✅" if profile.wb_api else "❌",
-            ms="✅" if profile.ms_api else "❌",
         )
         if extra:
             text = f"{text}\n\n{extra}"
@@ -178,7 +178,7 @@ async def render_export_missing_token(
         nav_action,
         ScreenState(SCREEN_EXPORT_STATUS, {"service": service, "status": "missing"}),
     )
-    service_name = "МойСклад" if service.upper() == "MS" else "WB"
+    service_name = "WB" if service.upper() == "WB" else service.upper()
     text = f"Не хватает ключа {service_name}. {EXPORT_MISSING_TEMPLATE}"
     return await card_manager.render(
         bot,
@@ -190,7 +190,7 @@ async def render_export_missing_token(
 
 
 def _service_name_from_kind(kind: str) -> str:
-    return "МойСклад" if kind.startswith("ms") else "WB"
+    return "WB"
 
 
 async def render_export_error(
@@ -356,8 +356,11 @@ async def render_profile(
 ) -> int:
     await _apply_nav(state, nav_action, ScreenState(SCREEN_PROFILE))
     wb_state = "✅" if profile.wb_api else "❌"
-    ms_state = "✅" if profile.ms_api else "❌"
-    email = profile.email or "—"
+    if profile.email:
+        status = "подтверждена ✅" if profile.email_verified else "не подтверждена ❌"
+        email = f"{profile.email} ({status})"
+    else:
+        email = "—"
     company = profile.company_name or profile.display_login
     lines = [
         "👤 Профиль",
@@ -367,7 +370,6 @@ async def render_profile(
         f"Дата регистрации: {_format_datetime(profile.created_at)}",
         f"Почта: {email}",
         f"WB API: {wb_state}",
-        f"МойСклад API: {ms_state}",
     ]
     if extra:
         lines.extend(["", extra])
@@ -407,30 +409,21 @@ async def render_edit_wb(
     return await card_manager.render(bot, chat_id, text, reply_markup=kb_edit_wb(), state=state)
 
 
-async def render_edit_ms(
+async def render_edit_email(
     bot: Bot,
     state: FSMContext,
     chat_id: int,
     *,
     nav_action: str = "push",
+    await_code: bool = False,
+    email: str | None = None,
     prompt: str | None = None,
 ) -> int:
-    await _apply_nav(state, nav_action, ScreenState(SCREEN_EDIT_MS))
-    text = EDIT_MS_TEXT if not prompt else f"{EDIT_MS_TEXT}\n\n{prompt}"
-    return await card_manager.render(bot, chat_id, text, reply_markup=kb_edit_ms(), state=state)
-
-
-async def render_edit_email(
-    bot: Bot, state: FSMContext, chat_id: int, *, nav_action: str = "push"
-) -> int:
     await _apply_nav(state, nav_action, ScreenState(SCREEN_EDIT_EMAIL))
-    return await card_manager.render(
-        bot,
-        chat_id,
-        EDIT_EMAIL_TEXT,
-        reply_markup=kb_edit_email(),
-        state=state,
-    )
+    base = EMAIL_CODE_TEXT.format(email=email or "указанный адрес") if await_code else EDIT_EMAIL_TEXT
+    if prompt:
+        base = f"{base}\n\n{prompt}"
+    return await card_manager.render(bot, chat_id, base, reply_markup=kb_edit_email(), state=state)
 
 
 async def render_unknown(

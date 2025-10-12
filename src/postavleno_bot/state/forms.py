@@ -19,9 +19,10 @@ class EditWBState(StatesGroup):
     await_token = State()
 
 
-class EditMSState(StatesGroup):
-    await_token = State()
-
-
 class EditCompanyState(StatesGroup):
     await_name = State()
+
+
+class EditEmailState(StatesGroup):
+    await_email = State()
+    await_code = State()

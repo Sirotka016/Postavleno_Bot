@@ -9,7 +9,6 @@ from .accounts import (
 )
 from .exports import (
     ExportResult,
-    export_ms_stocks_all,
     export_wb_stocks_all,
     export_wb_stocks_by_warehouse,
 )
@@ -23,7 +22,6 @@ __all__ = [
     "SessionStore",
     "delete_account",
     "get_accounts_repo",
-    "export_ms_stocks_all",
     "export_wb_stocks_all",
     "export_wb_stocks_by_warehouse",
     "session_store",

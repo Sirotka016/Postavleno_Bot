@@ -20,7 +20,6 @@ def kb_home(is_authed: bool) -> InlineKeyboardMarkup:
             [("👤 Профиль", "home.profile")],
             [("📊 Остатки WB (Общие)", "stocks_wb_all")],
             [("🏷️ Остатки WB (Склады)", "stocks_wb_bywh")],
-            [("📘 Остатки Мой Склад", "stocks_ms_all")],
             [("🔄 Обновить", "home.refresh")],
             [("✖️ Выйти", "home.exit")],
         ]
@@ -65,17 +64,13 @@ def kb_register() -> InlineKeyboardMarkup:
 def kb_profile() -> InlineKeyboardMarkup:
     return _build(
         [
-            [("🏢 Сменить название компании", "profile.company")],
-            [("🔑 Сменить WB API", "profile.wb")],
-            [("🔑 Сменить «Мой Склад» API", "profile.ms")],
-            [("✉️ Сменить почту (скоро)", "profile.email")],
-            [("📊 Остатки WB (Общие)", "stocks_wb_all")],
-            [("🏷️ Остатки WB (Склады)", "stocks_wb_bywh")],
-            [("📘 Остатки Мой Склад", "stocks_ms_all")],
+            [("🏢 Название компании", "profile.company")],
+            [("🔑 WB API", "profile.wb")],
+            [("✉️ Почта", "profile.email")],
             [("🗑️ Удалить аккаунт", "home.delete_open")],
             [("🔄 Обновить", "profile.refresh")],
             [("◀️ Назад", "nav.back")],
-            [("🚪 Выйти из профиля", "home.logout")],
+            [("📖 Выйти из профиля", "home.logout")],
             [("✖️ Выйти", "home.exit")],
         ]
     )
@@ -128,15 +123,6 @@ def kb_delete_error() -> InlineKeyboardMarkup:
 
 
 def kb_edit_wb() -> InlineKeyboardMarkup:
-    return _build(
-        [
-            [("◀️ Назад", "nav.back")],
-            [("✖️ Выйти", "home.exit")],
-        ]
-    )
-
-
-def kb_edit_ms() -> InlineKeyboardMarkup:
     return _build(
         [
             [("◀️ Назад", "nav.back")],
@@ -200,7 +186,6 @@ __all__ = [
     "kb_export_error",
     "kb_export_ready",
     "kb_edit_wb",
-    "kb_edit_ms",
     "kb_edit_company",
     "kb_edit_email",
     "kb_unknown",

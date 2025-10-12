@@ -1,7 +1,7 @@
 from postavleno_bot.domain.validators import (
     validate_company_name,
+    validate_email,
     validate_login,
-    validate_ms,
     validate_wb,
 )
 
@@ -21,10 +21,11 @@ def test_validate_wb_accepts_jwt_like() -> None:
     assert not validate_wb("a" * 513)
 
 
-def test_validate_ms_accepts_extended_charset() -> None:
-    token = "A" * 32
-    assert validate_ms(token)
-    assert not validate_ms("токен")
+def test_validate_email() -> None:
+    assert validate_email("user@example.com")
+    assert validate_email("user.name+tag@sub.example.co")
+    assert not validate_email("user@example")
+    assert not validate_email("user example@example.com")
 
 
 def test_validate_company_name() -> None:

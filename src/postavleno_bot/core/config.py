@@ -30,6 +30,28 @@ class Settings(BaseSettings):
     log_rich: bool = Field(True, validation_alias=AliasChoices("LOG_RICH"))
     http_timeout_s: float = Field(30.0, validation_alias=AliasChoices("HTTP_TIMEOUT_S"))
 
+    smtp_host: str = Field(
+        "smtp.gmail.com",
+        description="SMTP сервер для исходящих писем",
+        validation_alias=AliasChoices("SMTP_HOST"),
+    )
+    smtp_port: int = Field(587, description="SMTP порт", validation_alias=AliasChoices("SMTP_PORT"))
+    smtp_user: str = Field(
+        "NeAniiime@gmail.com",
+        description="Учётная запись для отправки писем",
+        validation_alias=AliasChoices("SMTP_USER"),
+    )
+    smtp_password: SecretStr = Field(
+        SecretStr(""),
+        description="Пароль приложения для SMTP",
+        validation_alias=AliasChoices("SMTP_PASSWORD"),
+    )
+    smtp_sender: str = Field(
+        "Postavleno_Bot",
+        description="Имя отправителя в письмах",
+        validation_alias=AliasChoices("SMTP_SENDER"),
+    )
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

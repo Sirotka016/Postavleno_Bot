@@ -26,13 +26,20 @@ class AccountProfile:
     company_name: str
     email: str | None
     wb_api: str | None
-    ms_api: str | None
+    email_verified: bool
+    email_pending_hash: str | None
+    email_pending_expires_at: datetime | None
 
     @property
     def created_at_iso(self) -> str:
         return self.created_at.replace(microsecond=0).isoformat()
 
     def to_dict(self) -> dict[str, Any]:
+        pending_expires = (
+            self.email_pending_expires_at.replace(microsecond=0).isoformat()
+            if self.email_pending_expires_at
+            else None
+        )
         return {
             "display_login": self.display_login,
             "username": self.username,
@@ -41,7 +48,9 @@ class AccountProfile:
             "company_name": self.company_name,
             "email": self.email,
             "wb_api": self.wb_api,
-            "ms_api": self.ms_api,
+            "email_verified": self.email_verified,
+            "email_pending_hash": self.email_pending_hash,
+            "email_pending_expires_at": pending_expires,
         }
 
     @classmethod
@@ -49,6 +58,13 @@ class AccountProfile:
         created_at = datetime.fromisoformat(str(payload["created_at"]))
         if created_at.tzinfo is None:
             created_at = created_at.replace(tzinfo=UTC)
+        pending_raw = payload.get("email_pending_expires_at")
+        pending_at: datetime | None = None
+        if pending_raw:
+            pending_at = datetime.fromisoformat(str(pending_raw))
+            if pending_at.tzinfo is None:
+                pending_at = pending_at.replace(tzinfo=UTC)
+            pending_at = pending_at.astimezone(UTC)
         return cls(
             display_login=str(payload["display_login"]),
             username=str(payload["username"]),
@@ -57,7 +73,9 @@ class AccountProfile:
             company_name=str(payload.get("company_name") or ""),
             email=payload.get("email"),
             wb_api=payload.get("wb_api"),
-            ms_api=payload.get("ms_api"),
+            email_verified=bool(payload.get("email_verified", False)),
+            email_pending_hash=payload.get("email_pending_hash"),
+            email_pending_expires_at=pending_at,
         )
 
     def with_updates(self, **fields: Any) -> AccountProfile:
@@ -123,7 +141,9 @@ class AccountsFSRepository:
             company_name=display_login,
             email=None,
             wb_api=None,
-            ms_api=None,
+            email_verified=False,
+            email_pending_hash=None,
+            email_pending_expires_at=None,
         )
         self._write(profile)
         return profile
@@ -137,29 +157,20 @@ class AccountsFSRepository:
         self._write(updated)
         return updated
 
-    def set_email(self, username: str, email: str | None) -> AccountProfile:
+    def update_fields(self, username: str, **fields: Any) -> AccountProfile:
         profile = self.get(username)
-        updated = profile.with_updates(email=email)
+        updated = profile.with_updates(**fields)
         self._write(updated)
         return updated
+
+    def set_email(self, username: str, email: str | None) -> AccountProfile:
+        return self.update_fields(username, email=email)
 
     def set_wb_api(self, username: str, token: str | None) -> AccountProfile:
-        profile = self.get(username)
-        updated = profile.with_updates(wb_api=token)
-        self._write(updated)
-        return updated
-
-    def set_ms_api(self, username: str, token: str | None) -> AccountProfile:
-        profile = self.get(username)
-        updated = profile.with_updates(ms_api=token)
-        self._write(updated)
-        return updated
+        return self.update_fields(username, wb_api=token)
 
     def set_company_name(self, username: str, company_name: str) -> AccountProfile:
-        profile = self.get(username)
-        updated = profile.with_updates(company_name=company_name)
-        self._write(updated)
-        return updated
+        return self.update_fields(username, company_name=company_name)
 
     def delete(self, username: str) -> None:
         path = self._account_dir(username)

@@ -26,13 +26,23 @@ def test_duplicate_login_is_rejected() -> None:
         repo.create(display_login="demouser", password="password")
 
 
-def test_update_tokens() -> None:
+def test_update_tokens_and_email_fields() -> None:
     repo = get_accounts_repo()
     profile = repo.create(display_login="TokenUser", password="password")
     updated = repo.set_wb_api(profile.username, "A" * 64)
     assert updated.wb_api == "A" * 64
-    updated = repo.set_ms_api(profile.username, "B" * 32)
-    assert updated.ms_api == "B" * 32
+    assert updated.email is None
+    assert not updated.email_verified
+
+    refreshed = repo.update_fields(
+        profile.username,
+        email="user@example.com",
+        email_verified=True,
+        email_pending_hash="hash",
+    )
+    assert refreshed.email == "user@example.com"
+    assert refreshed.email_verified is True
+    assert refreshed.email_pending_hash == "hash"
 
 
 def test_delete_account_removes_directory() -> None:
