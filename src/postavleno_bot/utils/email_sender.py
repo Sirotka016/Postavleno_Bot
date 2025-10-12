@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from email.headerregistry import Address
 from email.message import EmailMessage
 
 from aiosmtplib import SMTP, SMTPException
@@ -19,16 +20,22 @@ async def send_email(
     body: str,
     timeout: int = 20,
 ) -> None:
-    """Send an email using STARTTLS over SMTP."""
+    """Send an email via SMTP with the proper TLS workflow."""
 
     message = EmailMessage()
-    message["From"] = f"{sender_name} <{username}>"
+    message["From"] = str(Address(display_name=sender_name, addr_spec=username))
     message["To"] = to_email
     message["Subject"] = subject
     message.set_content(body)
 
-    smtp = SMTP(hostname=host, port=port, start_tls=True, timeout=timeout)
-    await smtp.connect()
+    if port == 465:
+        smtp = SMTP(hostname=host, port=port, use_tls=True, timeout=timeout)
+        await smtp.connect()
+    else:
+        smtp = SMTP(hostname=host, port=port, timeout=timeout)
+        await smtp.connect()
+        await smtp.starttls()
+
     try:
         await smtp.login(username, password)
         await smtp.send_message(message)

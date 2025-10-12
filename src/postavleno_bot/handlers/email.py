@@ -62,7 +62,7 @@ async def handle_email_input(message: Message, state: FSMContext) -> None:
         nav_action="replace",
         await_code=True,
         email=updated.email,
-        prompt="Введите шестизначный код из письма.",
+        prompt="Код действителен 10 минут.",
     )
 
 
@@ -96,7 +96,7 @@ async def handle_code_input(message: Message, state: FSMContext) -> None:
             nav_action="replace",
             await_code=True,
             email=profile.email,
-            prompt="Код не подошёл или устарел. Запросите новый через кнопку «Почта».",
+            prompt="Код неверный или истёк. Попробуйте снова.",
         )
         return
 
@@ -107,7 +107,7 @@ async def handle_code_input(message: Message, state: FSMContext) -> None:
         message.chat.id,
         updated,
         nav_action="replace",
-        extra="Почта подтверждена ✅",
+        extra="Готово! Почта подтверждена ✅",
     )
 
 

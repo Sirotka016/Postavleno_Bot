@@ -58,6 +58,16 @@ def _most_common(series: pd.Series, *, drop_blank: bool = False) -> object:
     return cleaned.value_counts().index[0]
 
 
+def _first_nonempty(series: pd.Series) -> str:
+    for value in series:
+        if pd.isna(value):
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return ""
+
+
 def wb_to_df_all(items: list[dict[str, object]]) -> pd.DataFrame:
     df = pd.DataFrame(items)
     if df.empty:
@@ -110,7 +120,7 @@ def wb_to_df_all(items: list[dict[str, object]]) -> pd.DataFrame:
         df.groupby("supplierArticle")
         .agg(
             nmId=("nmId", lambda s: _most_common(s)),
-            barcode=("barcode", lambda s: _most_common(s, drop_blank=True)),
+            barcode=("barcode", _first_nonempty),
             quantity=("quantity", "sum"),
             inWayToClient=("inWayToClient", "sum"),
             inWayFromClient=("inWayFromClient", "sum"),
@@ -146,7 +156,7 @@ def wb_to_df_all(items: list[dict[str, object]]) -> pd.DataFrame:
 
 def wb_to_df_bywh(items: list[dict[str, object]]) -> pd.DataFrame:
     columns = [
-        ("warehouseName", "Склад", _clean_str_series),
+        ("warehouseName", "Город склада", _clean_str_series),
         ("supplierArticle", "Артикул поставщика", _clean_str_series),
         ("nmId", "nmId", _clean_int_series),
         ("barcode", "Штрихкод", _clean_str_series),
@@ -172,7 +182,7 @@ def wb_to_df_bywh(items: list[dict[str, object]]) -> pd.DataFrame:
     for _, header, cleaner in columns:
         df[header] = cleaner(df[header])
 
-    return df.sort_values(["Склад", "Артикул поставщика", "nmId"], kind="stable").reset_index(drop=True)
+    return df.sort_values(["Город склада", "Артикул поставщика", "nmId"], kind="stable").reset_index(drop=True)
 
 
 __all__ = [

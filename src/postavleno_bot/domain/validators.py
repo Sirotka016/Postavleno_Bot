@@ -22,10 +22,12 @@ def validate_wb(value: str) -> bool:
 
 
 def validate_company_name(value: str) -> bool:
-    """Return ``True`` when *value* looks like a company name (1–60 chars)."""
+    """Return ``True`` when *value* looks like a company name (1–70 chars)."""
 
     stripped = value.strip()
-    return 1 <= len(stripped) <= 60
+    if "\n" in value or "\r" in value:
+        return False
+    return 1 <= len(stripped) <= 70
 
 
 def validate_email(value: str) -> bool:

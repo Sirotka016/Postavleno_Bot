@@ -17,15 +17,14 @@ EMAIL_SUBJECT = "Подтверждение почты — Postavleno_Bot"
 EMAIL_BODY_TEMPLATE = """Здравствуйте!
 
 Вы запросили подтверждение почты для аккаунта в Postavleno_Bot.
-Ваш одноразовый код: {code}
+Введите этот код в боте, чтобы подтвердить адрес:
 
-Скопируйте код и отправьте его боту в ответ на запрос.
-Код действует {ttl} минут.
+{code}
 
-Если это были не вы — просто игнорируйте письмо.
-Мы никогда не просим пароль от вашего аккаунта.
+Код действителен 10 минут. Если вы не запрашивали подтверждение — просто игнорируйте это письмо.
 
-— Команда Postavleno_Bot
+С заботой о данных,
+Команда Postavleno_Bot
 """
 
 
@@ -74,7 +73,7 @@ async def start_email_verification(profile: AccountProfile, email: str) -> Accou
         sender_name=settings.smtp_sender,
         to_email=email,
         subject=EMAIL_SUBJECT,
-        body=EMAIL_BODY_TEMPLATE.format(code=code, ttl=CODE_TTL_MINUTES),
+        body=EMAIL_BODY_TEMPLATE.format(code=code),
     )
     return updated
 
